@@ -22,7 +22,7 @@ class SourceRepository:
         return list(self.session.scalars(stmt))
 
     def upsert_from_config(self, config: SourceConfig) -> Source:
-        source = self.get_by_key(config.key)
+        source = self._get_pending_by_key(config.key) or self.get_by_key(config.key)
         values = config.model_dump()
         if source is None:
             source = Source(**values)
@@ -38,3 +38,9 @@ class SourceRepository:
         source.access_denied_at = utc_now()
         source.access_denied_reason = reason
         source.updated_at = utc_now()
+
+    def _get_pending_by_key(self, key: str) -> Source | None:
+        for instance in self.session.new:
+            if isinstance(instance, Source) and instance.key == key:
+                return instance
+        return None

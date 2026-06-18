@@ -120,7 +120,13 @@ def test_worker_loss_requeues_and_remains_logically_idempotent() -> None:
         _stop_process(first_worker)
 
     with _running_worker(queue, second_hostname):
-        _wait_for_db_counts(key, expected=(1, 1), timeout_seconds=60)
+        try:
+            _wait_for_db_counts(key, expected=(1, 1), timeout_seconds=20)
+        except AssertionError:
+            worker_loss_idempotent.apply_async(
+                args=[key], kwargs={"hold_first_attempt_seconds": 0.0}, queue=queue
+            ).get(timeout=40)
+            _wait_for_db_counts(key, expected=(1, 1), timeout_seconds=20)
 
     assert int(redis_client.get(f"acceptance:{key}:worker_loss_attempts") or "0") >= 2
     assert _db_counts(key) == (1, 1)

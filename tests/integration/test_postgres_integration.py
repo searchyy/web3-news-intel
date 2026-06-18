@@ -155,7 +155,7 @@ def test_event_filtering(postgres_session) -> None:
         Event(
             event_key="pg:filter:1",
             title="ABC listing",
-            category="listing",
+            category="pg_filter_listing",
             status="confirmed",
             severity="high",
             published_at=now,
@@ -169,7 +169,7 @@ def test_event_filtering(postgres_session) -> None:
         Event(
             event_key="pg:filter:2",
             title="DEF exploit",
-            category="exploit",
+            category="pg_filter_exploit",
             status="needs_review",
             severity="critical",
             published_at=now - timedelta(days=2),
@@ -184,7 +184,9 @@ def test_event_filtering(postgres_session) -> None:
     postgres_session.add_all(events)
     postgres_session.flush()
     repo = EventRepository(postgres_session)
-    assert [event.event_key for event in repo.list(category="listing")] == ["pg:filter:1"]
+    assert [event.event_key for event in repo.list(category="pg_filter_listing")] == [
+        "pg:filter:1"
+    ]
     assert [event.event_key for event in repo.list(status="needs_review")] == ["pg:filter:2"]
     assert [event.event_key for event in repo.list(severity="critical")] == ["pg:filter:2"]
     assert [event.event_key for event in repo.list(symbol="ABC")] == ["pg:filter:1"]

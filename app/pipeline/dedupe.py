@@ -137,11 +137,12 @@ class DedupeService:
         raw_document: RawDocument | None,
         source_score: int,
     ) -> None:
+        link_url = normalized.canonical_url or normalized.url
         existing_link = self.session.scalar(
             select(EventSource).where(
                 EventSource.event_id == event.id,
                 EventSource.source_id == source.id,
-                EventSource.url == normalized.url,
+                EventSource.url == link_url,
             )
         )
         if existing_link is not None:
@@ -153,7 +154,7 @@ class DedupeService:
                         event_id=event.id,
                         source_id=source.id,
                         raw_document_id=raw_document.id if raw_document is not None else None,
-                        url=normalized.url,
+                        url=link_url,
                         title=normalized.title,
                         published_at=normalized.published_at,
                         source_score=source_score,
