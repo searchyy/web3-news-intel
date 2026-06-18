@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>Ethereum Foundation Blog</title>
+  <entry>
+    <title>Protocol Upgrade Mainnet Release</title>
+    <link href="https://blog.ethereum.org/2026/06/18/protocol-upgrade" />
+    <id>eth-upgrade-2026</id>
+    <updated>2026-06-18T04:00:00Z</updated>
+    <summary>Sanitized protocol upgrade fixture.</summary>
+  </entry>
+</feed>
+

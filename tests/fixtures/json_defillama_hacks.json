@@ -1,0 +1,12 @@
+{
+  "hacks": [
+    {
+      "name": "Example Protocol Exploit",
+      "description": "Sanitized exploit fixture from public API shape.",
+      "date": "2026-06-18T05:00:00Z",
+      "url": "https://defillama.com/hacks/example-protocol",
+      "classification": "Access control"
+    }
+  ]
+}
+

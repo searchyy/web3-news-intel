@@ -1,0 +1,76 @@
+sources:
+  sec_press:
+    name: "SEC Press Releases"
+    source_type: "regulator_official"
+    adapter: "rss"
+    url: "https://www.sec.gov/news/pressreleases.rss"
+    canonical_url: "https://www.sec.gov/news/pressreleases.rss"
+    category: "regulation"
+    language: "en"
+    trust_score: 100
+    poll_seconds: 300
+    timeout_seconds: 15
+    max_response_bytes: 2097152
+    enabled: true
+    allow_private_networks: false
+    allow_localhost: false
+    config:
+      parser_version: "generic_rss_v1"
+
+  binance_listing:
+    name: "Binance New Listings"
+    source_type: "exchange_official"
+    adapter: "html"
+    url: "https://www.binance.com/en/support/announcement/list/48"
+    canonical_url: "https://www.binance.com/en/support/announcement/list/48"
+    category: "listing"
+    language: "en"
+    trust_score: 95
+    poll_seconds: 120
+    timeout_seconds: 15
+    max_response_bytes: 2097152
+    enabled: false
+    allow_private_networks: false
+    allow_localhost: false
+    config:
+      parser: "generic"
+      max_items: 20
+
+  coindesk:
+    name: "CoinDesk RSS"
+    source_type: "tier1_media"
+    adapter: "rss"
+    url: "https://www.coindesk.com/arc/outboundfeeds/rss/"
+    canonical_url: "https://www.coindesk.com/arc/outboundfeeds/rss/"
+    category: "media"
+    language: "en"
+    trust_score: 75
+    poll_seconds: 180
+    timeout_seconds: 15
+    max_response_bytes: 2097152
+    enabled: true
+    allow_private_networks: false
+    allow_localhost: false
+    config:
+      parser_version: "generic_rss_v1"
+
+  snapshot_graphql:
+    name: "Snapshot Governance"
+    source_type: "governance_api"
+    adapter: "graphql"
+    url: "https://hub.snapshot.org/graphql"
+    canonical_url: "https://hub.snapshot.org/graphql"
+    category: "governance"
+    language: "en"
+    trust_score: 90
+    poll_seconds: 180
+    timeout_seconds: 15
+    max_response_bytes: 2097152
+    enabled: false
+    allow_private_networks: false
+    allow_localhost: false
+    config:
+      query_name: "recent_proposals"
+      spaces:
+        - "aave.eth"
+        - "uniswapgovernance.eth"

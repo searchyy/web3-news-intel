@@ -1,0 +1,135 @@
+sources:
+  sec_press:
+    name: "SEC Press Releases"
+    source_type: "regulator_official"
+    adapter: "rss"
+    url: "https://www.sec.gov/news/pressreleases.rss"
+    canonical_url: "https://www.sec.gov/news/pressreleases.rss"
+    category: "regulation"
+    language: "en"
+    trust_score: 100
+    poll_seconds: 300
+    timeout_seconds: 15
+    max_response_bytes: 2097152
+    enabled: true
+    allow_private_networks: false
+    allow_localhost: false
+    config:
+      parser_version: "generic_rss_v1"
+
+  cftc_press:
+    name: "CFTC Press Releases"
+    source_type: "regulator_official"
+    adapter: "rss"
+    url: "https://www.cftc.gov/RSS/RSSGP/rssgp.xml"
+    canonical_url: "https://www.cftc.gov/RSS/RSSGP/rssgp.xml"
+    category: "regulation"
+    language: "en"
+    trust_score: 100
+    poll_seconds: 300
+    timeout_seconds: 15
+    max_response_bytes: 2097152
+    enabled: true
+    allow_private_networks: false
+    allow_localhost: false
+    config:
+      parser_version: "generic_rss_v1"
+
+  ethereum_blog:
+    name: "Ethereum Foundation Blog"
+    source_type: "protocol_official"
+    adapter: "rss"
+    url: "https://blog.ethereum.org/feed.xml"
+    canonical_url: "https://blog.ethereum.org/feed.xml"
+    category: "protocol"
+    language: "en"
+    trust_score: 95
+    poll_seconds: 300
+    timeout_seconds: 15
+    max_response_bytes: 2097152
+    enabled: true
+    allow_private_networks: false
+    allow_localhost: false
+    config:
+      parser_version: "generic_rss_v1"
+
+  coindesk:
+    name: "CoinDesk RSS"
+    source_type: "tier1_media"
+    adapter: "rss"
+    url: "https://www.coindesk.com/arc/outboundfeeds/rss/"
+    canonical_url: "https://www.coindesk.com/arc/outboundfeeds/rss/"
+    category: "media"
+    language: "en"
+    trust_score: 75
+    poll_seconds: 180
+    timeout_seconds: 15
+    max_response_bytes: 2097152
+    enabled: true
+    allow_private_networks: false
+    allow_localhost: false
+    config:
+      parser_version: "generic_rss_v1"
+
+  defillama_hacks:
+    name: "DefiLlama Hacks"
+    source_type: "onchain_data"
+    adapter: "json_api"
+    url: "https://api.llama.fi/hacks"
+    canonical_url: "https://api.llama.fi/hacks"
+    category: "security"
+    language: "en"
+    trust_score: 85
+    poll_seconds: 300
+    timeout_seconds: 15
+    max_response_bytes: 2097152
+    enabled: true
+    allow_private_networks: false
+    allow_localhost: false
+    config:
+      parser_version: "defillama_hacks_json_v1"
+      items_path: "hacks"
+      title_fields: ["name", "title"]
+      summary_fields: ["description", "technique", "classification"]
+      url_fields: ["url", "source"]
+      date_fields: ["date", "timestamp"]
+
+  binance_listing:
+    name: "Binance New Listings"
+    source_type: "exchange_official"
+    adapter: "html"
+    url: "https://www.binance.com/en/support/announcement/list/48"
+    canonical_url: "https://www.binance.com/en/support/announcement/list/48"
+    category: "listing"
+    language: "en"
+    trust_score: 95
+    poll_seconds: 120
+    timeout_seconds: 15
+    max_response_bytes: 2097152
+    enabled: false
+    allow_private_networks: false
+    allow_localhost: false
+    config:
+      parser: "binance"
+      parser_version: "disabled_until_selectors_verified"
+      max_items: 20
+
+  blockbeats_newsflash:
+    name: "BlockBeats Newsflash"
+    source_type: "chinese_media"
+    adapter: "html"
+    url: "https://m.theblockbeats.info/newsflash"
+    canonical_url: "https://m.theblockbeats.info/newsflash"
+    category: "media"
+    language: "zh"
+    trust_score: 72
+    poll_seconds: 120
+    timeout_seconds: 15
+    max_response_bytes: 2097152
+    enabled: false
+    allow_private_networks: false
+    allow_localhost: false
+    config:
+      parser: "chinese_media"
+      parser_version: "disabled_until_selectors_verified"
+      max_items: 20

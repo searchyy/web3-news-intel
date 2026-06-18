@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>CoinDesk</title>
+    <item>
+      <title>Protocol ABC Releases Mainnet Upgrade</title>
+      <link>https://www.coindesk.com/tech/2026/06/18/protocol-abc-upgrade/</link>
+      <guid>coindesk-abc</guid>
+      <pubDate>Thu, 18 Jun 2026 05:00:00 GMT</pubDate>
+      <description>Protocol ABC shipped a major release.</description>
+    </item>
+  </channel>
+</rss>
+

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Missing Optional Fields</title>
+    <item>
+      <title>Protocol ABC Releases Mainnet Upgrade</title>
+      <link>https://example.com/protocol-abc-upgrade</link>
+    </item>
+  </channel>
+</rss>

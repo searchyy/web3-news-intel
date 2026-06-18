@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>SEC Press Releases</title>
+    <item>
+      <title>SEC Charges Example Exchange With Securities Law Violations</title>
+      <link>https://www.sec.gov/news/press-release/2026-001?utm_source=test</link>
+      <guid>sec-2026-001</guid>
+      <pubDate>Thu, 18 Jun 2026 02:00:00 GMT</pubDate>
+      <description>The Securities and Exchange Commission announced charges.</description>
+    </item>
+    <item>
+      <title>SEC Charges Example Exchange With Securities Law Violations</title>
+      <link>https://www.sec.gov/news/press-release/2026-001?utm_campaign=duplicate</link>
+      <guid>sec-2026-001-dup</guid>
+      <pubDate>Thu, 18 Jun 2026 02:01:00 GMT</pubDate>
+      <description>Duplicate report with tracking parameters.</description>
+    </item>
+  </channel>
+</rss>
+

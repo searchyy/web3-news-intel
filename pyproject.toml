@@ -1,0 +1,65 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "web3-news-intel"
+version = "0.1.0"
+description = "Reliable Web3/Crypto news intelligence crawler and alerting service"
+requires-python = ">=3.12"
+dependencies = [
+  "alembic>=1.13",
+  "beautifulsoup4>=4.12",
+  "celery[redis]>=5.4",
+  "fastapi>=0.111",
+  "feedparser>=6.0",
+  "httpx>=0.27",
+  "lxml>=5.2",
+  "prometheus-client>=0.20",
+  "psycopg[binary]>=3.2",
+  "pydantic>=2.7",
+  "pydantic-settings>=2.3",
+  "python-dateutil>=2.9",
+  "PyYAML>=6.0",
+  "redis>=5.0",
+  "SQLAlchemy>=2.0",
+  "structlog>=24.1",
+  "uvicorn[standard]>=0.30",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.2",
+  "pytest-asyncio>=0.23",
+  "respx>=0.21",
+  "ruff>=0.5",
+  "mypy>=1.11",
+  "types-PyYAML>=6.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["app*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = "-q -p no:cacheprovider"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["B008"]
+
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+check_untyped_defs = false
+disallow_untyped_defs = false
+warn_unused_ignores = false
+warn_return_any = false
+no_implicit_optional = false
+disable_error_code = ["attr-defined", "union-attr", "assignment", "arg-type", "call-arg"]

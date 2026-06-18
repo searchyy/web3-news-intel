@@ -1,0 +1,29 @@
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Any
+
+from pydantic import BaseModel, Field, field_validator
+
+from app.core.time import ensure_utc
+
+
+class NormalizedItem(BaseModel):
+    title: str
+    summary: str | None = None
+    url: str
+    canonical_url: str | None = None
+    published_at: datetime | None = None
+    source_key: str
+    source_type: str
+    category: str
+    language: str | None = None
+    symbols: list[str] = Field(default_factory=list)
+    chains: list[str] = Field(default_factory=list)
+    entities: list[str] = Field(default_factory=list)
+    raw: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("published_at")
+    @classmethod
+    def published_at_utc(cls, value: datetime | None) -> datetime | None:
+        return ensure_utc(value)
