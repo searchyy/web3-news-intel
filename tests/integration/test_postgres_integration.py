@@ -5,7 +5,7 @@ from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import create_engine, inspect, select, text
+from sqlalchemy import create_engine, delete, inspect, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
@@ -135,10 +135,21 @@ def test_concurrent_event_creation_is_idempotent(monkeypatch) -> None:
             session.commit()
             return event.id
 
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        ids = list(pool.map(lambda _: create_once(), range(2)))
-    assert len(set(ids)) == 1
-    engine.dispose()
+    try:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            ids = list(pool.map(lambda _: create_once(), range(2)))
+        assert len(set(ids)) == 1
+    finally:
+        with SessionLocal() as session:
+            event_ids = list(
+                session.scalars(select(Event.id).where(Event.primary_url == item_url))
+            )
+            if event_ids:
+                session.execute(delete(EventSource).where(EventSource.event_id.in_(event_ids)))
+                session.execute(delete(Event).where(Event.id.in_(event_ids)))
+            session.execute(delete(Source).where(Source.key == source_key))
+            session.commit()
+        engine.dispose()
 
 
 def test_transaction_rollback(postgres_session) -> None:
@@ -156,8 +167,8 @@ def test_event_filtering(postgres_session) -> None:
             event_key="pg:filter:1",
             title="ABC listing",
             category="pg_filter_listing",
-            status="confirmed",
-            severity="high",
+            status="pg_filter_confirmed",
+            severity="pg_filter_high",
             published_at=now,
             trust_score=95,
             confirmation_count=1,
@@ -170,8 +181,8 @@ def test_event_filtering(postgres_session) -> None:
             event_key="pg:filter:2",
             title="DEF exploit",
             category="pg_filter_exploit",
-            status="needs_review",
-            severity="critical",
+            status="pg_filter_needs_review",
+            severity="pg_filter_critical",
             published_at=now - timedelta(days=2),
             trust_score=75,
             confirmation_count=1,
@@ -187,8 +198,12 @@ def test_event_filtering(postgres_session) -> None:
     assert [event.event_key for event in repo.list(category="pg_filter_listing")] == [
         "pg:filter:1"
     ]
-    assert [event.event_key for event in repo.list(status="needs_review")] == ["pg:filter:2"]
-    assert [event.event_key for event in repo.list(severity="critical")] == ["pg:filter:2"]
+    assert [event.event_key for event in repo.list(status="pg_filter_needs_review")] == [
+        "pg:filter:2"
+    ]
+    assert [event.event_key for event in repo.list(severity="pg_filter_critical")] == [
+        "pg:filter:2"
+    ]
     assert [event.event_key for event in repo.list(symbol="ABC")] == ["pg:filter:1"]
     assert [event.event_key for event in repo.list(published_since=now - timedelta(days=1))] == [
         "pg:filter:1"
