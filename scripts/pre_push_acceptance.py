@@ -132,6 +132,8 @@ def _run_command(label: str, command: list[str], *, cwd: Path) -> CommandResult:
             cwd=cwd,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             env=env,
         )
     except FileNotFoundError as exc:

@@ -6,6 +6,10 @@ venv/
 __pycache__/
 *.py[cod]
 .pytest_cache/
+.pytest_tmp/
+tests/.pytest_tmp/
+tests/_pytest_tmp/
+tests/_acceptance_tmp/
 .mypy_cache/
 .ruff_cache/
 .coverage
