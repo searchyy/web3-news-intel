@@ -168,6 +168,7 @@ def _source(
 
 @contextmanager
 def fixture_server():
+    FixtureHandler.hits = {}
     server = ThreadingHTTPServer(("127.0.0.1", 0), FixtureHandler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -214,6 +215,9 @@ class FixtureHandler(BaseHTTPRequestHandler):
             self.end_headers()
 
     def do_POST(self) -> None:
+        length = int(self.headers.get("Content-Length", "0") or "0")
+        if length:
+            self.rfile.read(length)
         if self.path == "/graphql":
             payload = {
                 "data": {

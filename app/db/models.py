@@ -21,6 +21,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import Base
 
 TextArray = postgresql.ARRAY(Text()).with_variant(JSON(), "sqlite")
+JsonDocument = postgresql.JSONB().with_variant(JSON(), "sqlite")
 BigIntPk = BigInteger().with_variant(Integer(), "sqlite")
 
 
@@ -45,7 +46,7 @@ class Source(Base):
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     allow_private_networks: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     allow_localhost: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    config: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    config: Mapped[dict[str, Any]] = mapped_column(JsonDocument, nullable=False, default=dict)
     access_denied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     access_denied_reason: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(
@@ -96,7 +97,7 @@ class RawDocument(Base):
     body_hash: Mapped[str] = mapped_column(Text, nullable=False)
     body: Mapped[str | None] = mapped_column(Text)
     metadata_: Mapped[dict[str, Any]] = mapped_column(
-        "metadata", JSON, nullable=False, default=dict
+        "metadata", JsonDocument, nullable=False, default=dict
     )
     fetched_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
@@ -132,7 +133,7 @@ class Event(Base):
     chains: Mapped[list[str]] = mapped_column(TextArray, nullable=False, default=list)
     entities: Mapped[list[str]] = mapped_column(TextArray, nullable=False, default=list)
     metadata_: Mapped[dict[str, Any]] = mapped_column(
-        "metadata", JSON, nullable=False, default=dict
+        "metadata", JsonDocument, nullable=False, default=dict
     )
 
     sources: Mapped[list[EventSource]] = relationship(
