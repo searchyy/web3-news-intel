@@ -30,7 +30,11 @@ class JSONAPIAdapter:
                 body_hash=response.body_hash,
                 body=response.text,
                 fetched_at=response.fetched_at,
-                metadata={"adapter": "json_api"},
+                metadata={
+                    "adapter": "json_api",
+                    "final_url": response.url,
+                    "response_bytes": len(response.text.encode("utf-8")),
+                },
             )
         ]
 
@@ -74,7 +78,9 @@ class JSONAPIAdapter:
 def _items_from_data(data: Any, config: dict[str, Any]) -> Iterable[dict[str, Any]]:
     path = config.get("items_path")
     if path:
-        data = _resolve_path(data, str(path))
+        resolved = _resolve_path(data, str(path))
+        if resolved is not None:
+            data = resolved
     elif isinstance(data, dict):
         for key in ("items", "results", "data", "hacks", "proposals"):
             if isinstance(data.get(key), list):

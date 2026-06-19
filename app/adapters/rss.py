@@ -39,7 +39,11 @@ class RSSAdapter:
                 body_hash=response.body_hash,
                 body=response.text,
                 fetched_at=response.fetched_at,
-                metadata={"adapter": "rss"},
+                metadata={
+                    "adapter": "rss",
+                    "final_url": response.url,
+                    "response_bytes": len(response.text.encode("utf-8")),
+                },
             )
         ]
 

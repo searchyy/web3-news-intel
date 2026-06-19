@@ -55,7 +55,12 @@ class GraphQLAdapter:
                 body_hash=response.body_hash,
                 body=response.text,
                 fetched_at=response.fetched_at,
-                metadata={"adapter": "graphql", "query_name": source.config.get("query_name")},
+                metadata={
+                    "adapter": "graphql",
+                    "query_name": source.config.get("query_name"),
+                    "final_url": response.url,
+                    "response_bytes": len(response.text.encode("utf-8")),
+                },
             )
         ]
 
