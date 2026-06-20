@@ -246,6 +246,19 @@ class AdminAuditLog(Base):
     )
 
 
+class SystemConfig(Base):
+    __tablename__ = "system_config"
+
+    key: Mapped[str] = mapped_column(Text, primary_key=True)
+    value_text: Mapped[str | None] = mapped_column(Text)
+    secret_ciphertext: Mapped[str | None] = mapped_column(Text)
+    secret_fingerprint: Mapped[str | None] = mapped_column(Text)
+    secret_hint: Mapped[str | None] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
 class EventSource(Base):
     __tablename__ = "event_sources"
     __table_args__ = (

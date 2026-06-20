@@ -6,6 +6,7 @@ import { DashboardPage } from "../pages/DashboardPage";
 import { DeliveriesPage } from "../pages/DeliveriesPage";
 import { EventsPage } from "../pages/EventsPage";
 import { FeishuGroupsPage } from "../pages/FeishuGroupsPage";
+import { FeishuSettingsPage } from "../pages/FeishuSettingsPage";
 import { LoginPage } from "../pages/LoginPage";
 import { RulesPage } from "../pages/RulesPage";
 import { SourcesPage } from "../pages/SourcesPage";
@@ -33,6 +34,7 @@ export function App() {
           <Route path="events" element={<EventsPage />} />
           <Route path="sources" element={<SourcesPage />} />
           <Route path="feishu-groups" element={<FeishuGroupsPage />} />
+          <Route path="settings/feishu" element={<FeishuSettingsPage />} />
           <Route path="rules" element={<RulesPage />} />
           <Route path="deliveries" element={<DeliveriesPage />} />
           <Route path="system" element={<SystemPage />} />

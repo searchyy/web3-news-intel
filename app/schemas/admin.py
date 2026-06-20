@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -191,6 +192,35 @@ class AuditLogRead(BaseModel):
     request_id: str
     ip_hash: str | None
     created_at: datetime
+
+
+class FeishuConfigBase(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    feishu_app_id: str | None = Field(default=None, alias="FEISHU_APP_ID")
+    feishu_app_secret: str | None = Field(default=None, alias="FEISHU_APP_SECRET")
+    feishu_verification_token: str | None = Field(
+        default=None, alias="FEISHU_VERIFICATION_TOKEN"
+    )
+    feishu_encrypt_key: str | None = Field(default=None, alias="FEISHU_ENCRYPT_KEY")
+    feishu_test_chat_id: str | None = Field(default=None, alias="FEISHU_TEST_CHAT_ID")
+    feishu_enabled: bool = Field(default=False, alias="FEISHU_ENABLED")
+    feishu_send_enabled: bool = Field(default=False, alias="FEISHU_SEND_ENABLED")
+
+
+class FeishuConfigRead(FeishuConfigBase):
+    connection_status: Literal["not_tested", "connected", "failed"] = "not_tested"
+
+
+class FeishuConfigWrite(FeishuConfigBase):
+    pass
+
+
+class FeishuTestResult(BaseModel):
+    status: Literal["success", "failed"]
+    latency_ms: int | None = None
+    message: str | None = None
+    error: str | None = None
 
 
 def _redact_config(value: dict) -> dict:

@@ -23,14 +23,14 @@ async def _main() -> int:
                 "config": {"wide_screen_mode": True},
                 "header": {
                     "template": "blue",
-                    "title": {"tag": "plain_text", "content": "web3-news-intel test card"},
+                    "title": {"tag": "plain_text", "content": "web3-news-intel 飞书测试卡片"},
                 },
                 "elements": [
                     {
                         "tag": "div",
                         "text": {
                             "tag": "lark_md",
-                            "content": "This is a single manually dispatched Feishu test card.",
+                            "content": "这是一条手动触发的飞书测试卡片。",
                         },
                     }
                 ],

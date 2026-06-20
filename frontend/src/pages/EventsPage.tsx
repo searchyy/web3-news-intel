@@ -1,4 +1,4 @@
-import { Button, Drawer, Space, Table, Tag } from "antd";
+import { Button, Drawer, Space, Table, Tag, Typography } from "antd";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
@@ -12,15 +12,16 @@ export function EventsPage() {
   });
   return (
     <>
+      <Typography.Title level={3}>事件列表</Typography.Title>
       <Table
         rowKey="id"
         loading={isLoading}
         dataSource={data}
         columns={[
-          { title: "标题", dataIndex: "title", ellipsis: true },
-          { title: "分类", dataIndex: "category" },
-          { title: "级别", dataIndex: "severity", render: (v) => <Tag>{v}</Tag> },
-          { title: "状态", dataIndex: "status" },
+          { title: "标题", dataIndex: "display_title", ellipsis: true, render: (_, row) => row.display_title || row.title },
+          { title: "分类", dataIndex: "category_label", render: (_, row) => row.category_label || row.category },
+          { title: "级别", dataIndex: "severity_label", render: (_, row) => <Tag>{row.severity_label || row.severity}</Tag> },
+          { title: "状态", dataIndex: "status_label", render: (_, row) => row.status_label || row.status },
           { title: "可信度", dataIndex: "trust_score" },
           { title: "发布时间", dataIndex: "published_at" },
           {

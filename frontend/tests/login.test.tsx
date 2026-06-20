@@ -21,15 +21,16 @@ function renderApp() {
   );
 }
 
-describe("login flow", () => {
-  it("logs in with a server-side session response", async () => {
+describe("登录流程", () => {
+  it("使用服务端会话登录并渲染中文界面", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify({ authenticated: true, username: "admin", csrf_token: "csrf" }), {
         status: 200,
         headers: { "Content-Type": "application/json" }
       })
     );
-    renderApp();
+    const view = renderApp();
+    expect(screen.getByText("管理员登录")).toBeInTheDocument();
     await userEvent.type(screen.getByLabelText("用户名"), "admin");
     await userEvent.type(screen.getByLabelText("密码"), "password");
     await userEvent.click(screen.getByRole("button", { name: /登\s*录/ }));
@@ -37,6 +38,7 @@ describe("login flow", () => {
       "/api/admin/auth/login",
       expect.objectContaining({ credentials: "include" })
     );
+    expect(view.container).toMatchSnapshot();
     fetchMock.mockRestore();
   });
 });

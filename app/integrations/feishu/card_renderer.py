@@ -19,7 +19,7 @@ SEVERITY_TEMPLATE = {
 
 def render_event_card(event: Event, *, dashboard_base_url: str | None = None) -> dict[str, Any]:
     title = _bounded(event.title, 160)
-    summary = _bounded(event.summary or "No summary available.", 500)
+    summary = _bounded(event.summary or "暂无摘要。", 500)
     source_name = _source_name(event)
     published = event.published_at or event.first_seen_at
     published_text = published.astimezone(UTC).isoformat() if published else "unknown"
@@ -27,14 +27,14 @@ def render_event_card(event: Event, *, dashboard_base_url: str | None = None) ->
     original_url = _safe_url(event.primary_url)
     actions = []
     if original_url:
-        actions.append(_button("View original source", original_url))
+        actions.append(_button("查看原文", original_url))
     if dashboard_url:
-        actions.append(_button("Open management dashboard", dashboard_url))
+        actions.append(_button("打开管理后台", dashboard_url))
     actions.extend(
         [
-            _action_button("Acknowledge", {"action": "acknowledge", "event_id": str(event.id)}),
+            _action_button("确认处理", {"action": "acknowledge", "event_id": str(event.id)}),
             _action_button(
-                "Mute symbol for one hour",
+                "静默代币 1 小时",
                 {"action": "mute_symbol", "event_id": str(event.id)},
             ),
         ]
@@ -50,13 +50,13 @@ def render_event_card(event: Event, *, dashboard_base_url: str | None = None) ->
             {
                 "tag": "div",
                 "fields": [
-                    _field("Source", source_name),
-                    _field("Published", published_text),
-                    _field("Trust score", str(event.trust_score)),
-                    _field("Confirmations", str(event.confirmation_count)),
-                    _field("Symbols", ", ".join(event.symbols[:10]) or "none"),
-                    _field("Chains", ", ".join(event.chains[:10]) or "none"),
-                    _field("Status", event.status),
+                    _field("来源", source_name),
+                    _field("发布时间", published_text),
+                    _field("可信度", str(event.trust_score)),
+                    _field("确认次数", str(event.confirmation_count)),
+                    _field("代币", ", ".join(event.symbols[:10]) or "无"),
+                    _field("链", ", ".join(event.chains[:10]) or "无"),
+                    _field("状态", event.status),
                 ],
             },
             {"tag": "hr"},
@@ -70,11 +70,11 @@ def render_event_text(event: Event) -> str:
     url = _safe_url(event.primary_url)
     parts = [
         f"{event.severity.upper()} {event.category}: {html.escape(_bounded(event.title, 160))}",
-        f"Status: {event.status}",
-        f"Trust score: {event.trust_score}",
+        f"状态: {event.status}",
+        f"可信度: {event.trust_score}",
     ]
     if event.symbols:
-        parts.append(f"Symbols: {', '.join(event.symbols[:10])}")
+        parts.append(f"代币: {', '.join(event.symbols[:10])}")
     if event.summary:
         parts.append(html.escape(_bounded(event.summary, 500)))
     if url:
@@ -112,7 +112,7 @@ def _source_name(event: Event) -> str:
         source = event.sources[0].source
         if source:
             return source.name
-    return "unknown"
+    return "未知"
 
 
 def _bounded(value: str, limit: int) -> str:

@@ -1,5 +1,5 @@
 import ReactECharts from "echarts-for-react";
-import { Card, Col, Row, Skeleton, Statistic } from "antd";
+import { Card, Col, Row, Skeleton, Statistic, Typography } from "antd";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
 import type { DashboardSummary } from "../types/api";
@@ -14,7 +14,7 @@ export function DashboardPage() {
   }
   const chart = {
     tooltip: {},
-    xAxis: { type: "category", data: ["1小时", "24小时", "关键", "成功投递", "失败投递"] },
+    xAxis: { type: "category", data: ["1 小时事件", "24 小时事件", "高危事件", "成功投递", "失败投递"] },
     yAxis: { type: "value" },
     series: [
       {
@@ -31,12 +31,13 @@ export function DashboardPage() {
   };
   return (
     <>
+      <Typography.Title level={3}>控制台</Typography.Title>
       <Row gutter={[12, 12]}>
-        <Metric title="最近1小时事件" value={data.events_last_hour} />
-        <Metric title="最近24小时事件" value={data.events_last_24h} />
-        <Metric title="Critical/High" value={data.critical_high_count} />
-        <Metric title="启用来源" value={data.enabled_sources} />
-        <Metric title="失败来源" value={data.failed_sources} />
+        <Metric title="最近 1 小时事件" value={data.events_last_hour} />
+        <Metric title="最近 24 小时事件" value={data.events_last_24h} />
+        <Metric title="严重/高危事件" value={data.critical_high_count} />
+        <Metric title="启用数据源" value={data.enabled_sources} />
+        <Metric title="失败数据源" value={data.failed_sources} />
         <Metric title="待审批飞书群" value={data.pending_feishu_groups} />
       </Row>
       <Card className="section" title="事件与投递概览">

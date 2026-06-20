@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 import uuid
 from datetime import UTC, datetime, timedelta
 
@@ -32,8 +33,11 @@ from app.db.models import (
     Source,
 )
 from app.db.repositories.notification_repo import NotificationRepository, write_audit_log
+from app.db.repositories.system_config_repo import SystemConfigRepository
 from app.db.session import get_session
-from app.integrations.feishu.client import validate_feishu_webhook_url
+from app.integrations.feishu.client import FeishuClient, validate_feishu_webhook_url
+from app.integrations.feishu.errors import FeishuAuthenticationError
+from app.integrations.feishu.token_provider import FeishuTokenProvider
 from app.publishers.feishu import publish_feishu_once
 from app.schemas.admin import (
     AdminAuthResponse,
@@ -45,6 +49,9 @@ from app.schemas.admin import (
     DestinationCreate,
     DestinationPatch,
     DestinationRead,
+    FeishuConfigRead,
+    FeishuConfigWrite,
+    FeishuTestResult,
     RuleCreate,
     RulePatch,
     RuleRead,
@@ -544,6 +551,61 @@ def test_destination(
     return DeliveryRead.model_validate(delivery)
 
 
+@router.get("/system/feishu-config", response_model=FeishuConfigRead)
+def get_feishu_config(
+    _: AdminPrincipal = Depends(require_admin_session),
+    session: Session = Depends(get_session),
+) -> FeishuConfigRead:
+    data = SystemConfigRepository(session).read_feishu_config()
+    return FeishuConfigRead.model_validate({**data, "connection_status": "not_tested"})
+
+
+@router.post("/system/feishu-config", response_model=FeishuConfigRead)
+def save_feishu_config(
+    payload: FeishuConfigWrite,
+    request: Request,
+    _: None = Depends(require_csrf),
+    principal: AdminPrincipal = Depends(require_admin_session),
+    session: Session = Depends(get_session),
+) -> FeishuConfigRead:
+    values = payload.model_dump(by_alias=True)
+    try:
+        SystemConfigRepository(session).save_feishu_config(
+            values,
+            encryptor=_field_encryptor_if_configured(),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    _audit(session, principal, request, "update", "system", "feishu-config", {})
+    session.commit()
+    data = SystemConfigRepository(session).read_feishu_config()
+    return FeishuConfigRead.model_validate({**data, "connection_status": "not_tested"})
+
+
+@router.post("/destinations/test-feishu", response_model=FeishuTestResult)
+def test_feishu_connection(
+    request: Request,
+    _: None = Depends(require_csrf),
+    principal: AdminPrincipal = Depends(require_admin_session),
+    session: Session = Depends(get_session),
+) -> FeishuTestResult:
+    config = SystemConfigRepository(session).read_feishu_plaintext(
+        encryptor=_field_encryptor_if_configured()
+    )
+    result = asyncio.run(_run_feishu_connection_test(config))
+    _audit(
+        session,
+        principal,
+        request,
+        "test",
+        "system",
+        "feishu-config",
+        {"status": result.status},
+    )
+    session.commit()
+    return result
+
+
 @router.get("/rules", response_model=list[RuleRead])
 def list_rules(
     _: AdminPrincipal = Depends(require_admin_session),
@@ -699,8 +761,8 @@ def _ensure_test_event(session: Session, destination: NotificationDestination) -
         return event
     event = Event(
         event_key=key,
-        title="Feishu integration test card",
-        summary="This is a harmless test message from web3-news-intel.",
+        title="飞书集成测试卡片",
+        summary="这是一条来自 web3-news-intel 的安全测试消息。",
         category="system",
         status="confirmed",
         severity="low",
@@ -719,6 +781,85 @@ def _ensure_test_event(session: Session, destination: NotificationDestination) -
     session.add(event)
     session.flush()
     return event
+
+
+def _field_encryptor_if_configured() -> FieldEncryptor | None:
+    if not settings.field_encryption_key:
+        return None
+    return FieldEncryptor(settings.field_encryption_key)
+
+
+async def _run_feishu_connection_test(config: dict[str, str | bool | None]) -> FeishuTestResult:
+    if not config.get("FEISHU_ENABLED") or not config.get("FEISHU_SEND_ENABLED"):
+        return FeishuTestResult(status="failed", error="send_disabled")
+    app_id = str(config.get("FEISHU_APP_ID") or "")
+    app_secret = str(config.get("FEISHU_APP_SECRET") or "")
+    chat_id = str(config.get("FEISHU_TEST_CHAT_ID") or "")
+    if not app_id or not app_secret or not chat_id:
+        return FeishuTestResult(status="failed", error="missing_config")
+    started = time.perf_counter()
+    import httpx
+
+    http_client = httpx.AsyncClient(timeout=10, trust_env=False, follow_redirects=False)
+    provider = FeishuTokenProvider(
+        app_id=app_id,
+        app_secret=app_secret,
+        client=http_client,
+        redis_client=_MemoryAsyncRedis(),
+    )
+    client = FeishuClient(token_provider=provider, client=http_client)
+    try:
+        result = await client.send_interactive_card(
+            chat_id,
+            {
+                "config": {"wide_screen_mode": True},
+                "header": {
+                    "template": "green",
+                    "title": {"tag": "plain_text", "content": "web3-news-intel 飞书连接测试"},
+                },
+                "elements": [
+                    {
+                        "tag": "div",
+                        "text": {
+                            "tag": "lark_md",
+                            "content": "这是一条由管理后台发送的安全测试卡片。",
+                        },
+                    }
+                ],
+            },
+        )
+    except FeishuAuthenticationError:
+        return FeishuTestResult(status="failed", error="invalid_app_secret")
+    except Exception:
+        return FeishuTestResult(status="failed", error="network_failed")
+    finally:
+        await http_client.aclose()
+    latency_ms = int((time.perf_counter() - started) * 1000)
+    if result.ok:
+        return FeishuTestResult(status="success", latency_ms=latency_ms, message="连接成功")
+    return FeishuTestResult(
+        status="failed",
+        latency_ms=latency_ms,
+        error="send_failed",
+    )
+
+
+class _MemoryAsyncRedis:
+    def __init__(self) -> None:
+        self._store: dict[str, str] = {}
+
+    async def get(self, key: str):
+        return self._store.get(key)
+
+    async def set(self, key: str, value: str, **kwargs):
+        if kwargs.get("nx") and key in self._store:
+            return False
+        self._store[key] = value
+        return True
+
+    async def delete(self, key: str):
+        self._store.pop(key, None)
+        return 1
 
 
 def _audit(

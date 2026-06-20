@@ -20,6 +20,11 @@ export type EventRow = {
   published_at?: string;
   first_seen_at: string;
   primary_url?: string;
+  display_title?: string;
+  display_summary?: string;
+  category_label?: string;
+  severity_label?: string;
+  status_label?: string;
 };
 export type SourceRow = {
   id: number;
@@ -81,4 +86,22 @@ export type AuditLog = {
   resource_id?: string;
   request_id: string;
   created_at: string;
+};
+
+export type FeishuConfig = {
+  FEISHU_APP_ID?: string | null;
+  FEISHU_APP_SECRET?: string | null;
+  FEISHU_VERIFICATION_TOKEN?: string | null;
+  FEISHU_ENCRYPT_KEY?: string | null;
+  FEISHU_TEST_CHAT_ID?: string | null;
+  FEISHU_ENABLED: boolean;
+  FEISHU_SEND_ENABLED: boolean;
+  connection_status: "not_tested" | "connected" | "failed";
+};
+
+export type FeishuTestResult = {
+  status: "success" | "failed";
+  latency_ms?: number | null;
+  message?: string | null;
+  error?: string | null;
 };

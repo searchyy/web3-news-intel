@@ -1,16 +1,21 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 
 import httpx
 import pytest
 from argon2 import PasswordHasher
 
+from app.api.routes import admin_api
 from app.core.admin_auth import _login_failures
 from app.core.config import settings
+from app.core.field_encryption import FieldEncryptor
+from app.db.models import Event
 from app.db.session import get_session
 from app.main import app
-from app.schemas.admin import DestinationRead
+from app.schemas.admin import DestinationRead, FeishuTestResult
+from app.schemas.event import EventRead
 
 
 @pytest.mark.asyncio
@@ -62,7 +67,7 @@ async def test_admin_login_rate_limits_unknown_username(monkeypatch, db_session)
                     json={"username": "intruder", "password": "wrong"},
                 )
                 assert response.status_code == 401
-                assert response.json()["detail"] == "invalid username or password"
+                assert response.json()["detail"] == "用户名或密码错误"
             response = await client.post(
                 "/api/admin/auth/login",
                 json={"username": "intruder", "password": "wrong"},
@@ -162,3 +167,158 @@ def test_destination_read_redacts_secret_config_fields() -> None:
     assert destination.config["api_token"] == "[redacted]"
     assert destination.config["nested"]["webhook_url"] == "[redacted]"
     assert destination.secret_fingerprint != "abcdef1234567890"
+
+
+def test_event_read_exposes_chinese_display_fields() -> None:
+    event = Event(
+        id=1,
+        event_key="zh:event",
+        title="以太坊基金会发布升级公告",
+        summary="协议升级摘要",
+        category="protocol",
+        status="confirmed",
+        severity="high",
+        language="zh-CN",
+        trust_score=90,
+        confirmation_count=1,
+        symbols=["ETH"],
+        chains=["Ethereum"],
+        entities=[],
+        metadata_={},
+        first_seen_at=datetime.now(UTC),
+        last_seen_at=datetime.now(UTC),
+    )
+    payload = EventRead.model_validate(event).model_dump()
+    assert payload["display_title"] == "以太坊基金会发布升级公告"
+    assert payload["display_summary"] == "协议升级摘要"
+    assert payload["category_label"] == "协议更新"
+    assert payload["severity_label"] == "高"
+    assert payload["status_label"] == "已确认"
+
+
+@pytest.mark.asyncio
+async def test_feishu_config_save_and_load_masks_secrets(monkeypatch, db_session) -> None:
+    monkeypatch.setattr(settings, "admin_username", "admin")
+    monkeypatch.setattr(settings, "admin_password_hash", PasswordHasher().hash("password"))
+    monkeypatch.setattr(settings, "admin_session_secret", "test-session-secret")
+    monkeypatch.setattr(settings, "admin_secure_cookie", False)
+    monkeypatch.setattr(settings, "field_encryption_key", FieldEncryptor.generate_key())
+
+    def override_session():
+        yield db_session
+
+    app.dependency_overrides[get_session] = override_session
+    try:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            login = await client.post(
+                "/api/admin/auth/login",
+                json={"username": "admin", "password": "password"},
+            )
+            csrf = login.json()["csrf_token"]
+            payload = {
+                "FEISHU_APP_ID": "cli_a_test",
+                "FEISHU_APP_SECRET": "app-secret-value",
+                "FEISHU_VERIFICATION_TOKEN": "verify-token",
+                "FEISHU_ENCRYPT_KEY": "encrypt-key",
+                "FEISHU_TEST_CHAT_ID": "oc_test",
+                "FEISHU_ENABLED": True,
+                "FEISHU_SEND_ENABLED": False,
+            }
+            saved = await client.post(
+                "/api/admin/system/feishu-config",
+                json=payload,
+                headers={"x-csrf-token": csrf},
+            )
+            assert saved.status_code == 200
+            body = saved.json()
+            assert body["FEISHU_APP_ID"] == "cli_a_test"
+            assert body["FEISHU_APP_SECRET"] == "****alue"
+            assert body["FEISHU_VERIFICATION_TOKEN"] == "****oken"
+            assert body["FEISHU_ENCRYPT_KEY"] == "****-key"
+            assert "app-secret-value" not in saved.text
+
+            loaded = await client.get("/api/admin/system/feishu-config")
+            assert loaded.json()["FEISHU_APP_SECRET"] == "****alue"
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_feishu_test_connection_success_and_failure(monkeypatch, db_session) -> None:
+    monkeypatch.setattr(settings, "admin_username", "admin")
+    monkeypatch.setattr(settings, "admin_password_hash", PasswordHasher().hash("password"))
+    monkeypatch.setattr(settings, "admin_session_secret", "test-session-secret")
+    monkeypatch.setattr(settings, "admin_secure_cookie", False)
+    monkeypatch.setattr(settings, "field_encryption_key", FieldEncryptor.generate_key())
+
+    async def fake_success(_config):
+        return FeishuTestResult(status="success", latency_ms=12, message="连接成功")
+
+    monkeypatch.setattr(admin_api, "_run_feishu_connection_test", fake_success)
+
+    def override_session():
+        yield db_session
+
+    app.dependency_overrides[get_session] = override_session
+    try:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            login = await client.post(
+                "/api/admin/auth/login",
+                json={"username": "admin", "password": "password"},
+            )
+            csrf = login.json()["csrf_token"]
+            await client.post(
+                "/api/admin/system/feishu-config",
+                json={
+                    "FEISHU_APP_ID": "cli_a_test",
+                    "FEISHU_APP_SECRET": "app-secret-value",
+                    "FEISHU_TEST_CHAT_ID": "oc_test",
+                    "FEISHU_ENABLED": True,
+                    "FEISHU_SEND_ENABLED": True,
+                },
+                headers={"x-csrf-token": csrf},
+            )
+            success = await client.post(
+                "/api/admin/destinations/test-feishu",
+                headers={"x-csrf-token": csrf},
+            )
+            assert success.status_code == 200
+            assert success.json()["status"] == "success"
+            assert success.json()["message"] == "连接成功"
+
+            async def fake_failure(_config):
+                return FeishuTestResult(status="failed", error="invalid_app_secret")
+
+            monkeypatch.setattr(admin_api, "_run_feishu_connection_test", fake_failure)
+            failure = await client.post(
+                "/api/admin/destinations/test-feishu",
+                headers={"x-csrf-token": csrf},
+            )
+            assert failure.status_code == 200
+            assert failure.json()["status"] == "failed"
+            assert failure.json()["error"] == "invalid_app_secret"
+
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_api_i18n_default_zh_and_accept_language_en(db_session) -> None:
+    def override_session():
+        yield db_session
+
+    app.dependency_overrides[get_session] = override_session
+    try:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            zh = await client.get("/events/999999")
+            assert zh.status_code == 404
+            assert zh.json()["detail"] == "事件不存在"
+
+            en = await client.get("/events/999999", headers={"accept-language": "en-US"})
+            assert en.status_code == 404
+            assert en.json()["detail"] == "event not found"
+    finally:
+        app.dependency_overrides.clear()
