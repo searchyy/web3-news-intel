@@ -15,6 +15,7 @@ REQUIRED_CI_JOBS = {
     "redis-celery-integration",
     "compose-acceptance",
 }
+EXPECTED_OPTIONAL_CI_JOBS = {"frontend-quality"}
 SENSITIVE_NAME_RE = re.compile(r"(token|secret|password|api[_-]?key|private[_-]?key)", re.I)
 SENSITIVE_ASSIGNMENT_RE = re.compile(
     r"(?i)(token|secret|password|api[_-]?key|private[_-]?key)=([^\s]+)"
@@ -36,7 +37,7 @@ class AcceptanceError(RuntimeError):
 
 COMMANDS: tuple[tuple[str, list[str]], ...] = (
     ("ruff", [sys.executable, "-m", "ruff", "check", "."]),
-    ("mypy", [sys.executable, "-m", "mypy", "app"]),
+    ("mypy", [sys.executable, "-m", "mypy", "app", "scripts"]),
     ("unit", [sys.executable, "-m", "pytest", "tests/unit", "-q"]),
     (
         "fixture-integration",
@@ -92,10 +93,16 @@ def validate_workflows(repo_root: Path) -> None:
     if not isinstance(jobs, dict):
         raise AcceptanceError("ci.yml is missing jobs mapping")
     actual = set(jobs)
-    if actual != REQUIRED_CI_JOBS:
+    if not REQUIRED_CI_JOBS.issubset(actual):
         raise AcceptanceError(
-            "ci.yml jobs must be exactly "
-            f"{sorted(REQUIRED_CI_JOBS)}; found {sorted(actual)}"
+            "ci.yml is missing required jobs "
+            f"{sorted(REQUIRED_CI_JOBS - actual)}; found {sorted(actual)}"
+        )
+    missing_optional = EXPECTED_OPTIONAL_CI_JOBS - actual
+    if missing_optional:
+        raise AcceptanceError(
+            "ci.yml is missing expected jobs "
+            f"{sorted(missing_optional)}; found {sorted(actual)}"
         )
 
 

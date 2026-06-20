@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import admin, events, health, metrics, sources
+from app.api.routes import admin, admin_api, events, feishu, health, metrics, sources
 from app.core.config import settings
 from app.core.logging import configure_logging
 
@@ -24,6 +24,8 @@ def create_app() -> FastAPI:
     app.include_router(events.router)
     app.include_router(sources.router)
     app.include_router(admin.router)
+    app.include_router(admin_api.router)
+    app.include_router(feishu.router)
     app.include_router(metrics.router)
     return app
 

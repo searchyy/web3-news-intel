@@ -47,8 +47,74 @@ class Settings(BaseSettings):
     discord_webhook_url: str | None = None
     alert_webhook_url: str | None = None
     alert_webhook_secret: str | None = None
+    feishu_enabled: bool = False
+    feishu_send_enabled: bool = False
+    feishu_app_id: str | None = None
+    feishu_app_secret: str | None = None
+    feishu_verification_token: str | None = None
+    feishu_encrypt_key: str | None = None
+    feishu_api_base: str = "https://open.feishu.cn"
+    feishu_test_chat_id: str | None = None
+    feishu_allowed_chat_ids: list[str] = Field(default_factory=list)
+    feishu_default_delivery_mode: Literal["immediate", "digest"] = "immediate"
+    feishu_max_messages_per_group_per_hour: int = Field(default=30, ge=1, le=500)
+    field_encryption_key: str | None = None
+    public_base_url: str | None = None
+    admin_username: str = "admin"
+    admin_password_hash: str | None = None
+    admin_session_secret: str | None = None
+    admin_session_ttl_seconds: int = Field(default=28800, ge=300, le=604800)
+    admin_secure_cookie: bool = True
     enable_acceptance_tasks: bool = False
     celery_redis_visibility_timeout_seconds: int = Field(default=3600, ge=1, le=86400)
+
+    @field_validator("feishu_allowed_chat_ids", mode="before")
+    @classmethod
+    def parse_chat_allowlist(cls, value: Any) -> list[str]:
+        if value is None or value == "":
+            return []
+        if isinstance(value, str):
+            return [item.strip() for item in value.split(",") if item.strip()]
+        if isinstance(value, list):
+            return [str(item).strip() for item in value if str(item).strip()]
+        raise ValueError("FEISHU_ALLOWED_CHAT_IDS must be a comma-separated string or list")
+
+    @model_validator(mode="after")
+    def validate_production_security(self) -> Settings:
+        if self.public_base_url:
+            validate_public_http_url(
+                self.public_base_url,
+                allow_private_networks=self.allow_private_networks,
+                allow_localhost=self.http_allow_localhost,
+                resolve_dns=False,
+            )
+            if self.public_base_url.startswith("https://") and not self.admin_secure_cookie:
+                raise ValueError("ADMIN_SECURE_COOKIE must be true for HTTPS PUBLIC_BASE_URL")
+        if self.feishu_api_base:
+            validate_public_http_url(
+                self.feishu_api_base,
+                allow_private_networks=False,
+                allow_localhost=False,
+                resolve_dns=False,
+            )
+        if self.app_env.lower() == "production":
+            missing = []
+            if not self.admin_password_hash:
+                missing.append("ADMIN_PASSWORD_HASH")
+            if not self.admin_session_secret:
+                missing.append("ADMIN_SESSION_SECRET")
+            if self.feishu_send_enabled:
+                for name, value in (
+                    ("FEISHU_APP_ID", self.feishu_app_id),
+                    ("FEISHU_APP_SECRET", self.feishu_app_secret),
+                ):
+                    if not value:
+                        missing.append(name)
+            if self.feishu_send_enabled and not self.feishu_enabled:
+                raise ValueError("FEISHU_ENABLED must be true when FEISHU_SEND_ENABLED is true")
+            if missing:
+                raise ValueError(f"missing production configuration: {', '.join(missing)}")
+        return self
 
 
 settings = Settings()

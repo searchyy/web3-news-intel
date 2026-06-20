@@ -16,6 +16,8 @@ class PublisherResult:
     ok: bool
     external_id: str | None = None
     error: str | None = None
+    response_status: int | None = None
+    retry_after: int | None = None
 
 
 class Publisher(Protocol):
@@ -55,13 +57,22 @@ class DeliveryManager:
         started = time.perf_counter()
         result = await publisher.publish(event)
         if result.ok:
-            self.repo.mark_delivered(delivery)
+            self.repo.mark_delivered(
+                delivery,
+                provider_message_id=result.external_id,
+                response_status=result.response_status,
+            )
             publisher_results_total.labels(channel=publisher.channel, outcome="success").inc()
             delivery_latency_seconds.labels(channel=publisher.channel).observe(
                 time.perf_counter() - started
             )
         else:
-            self.repo.mark_failed(delivery, result.error or "publisher failed")
+            self.repo.mark_failed(
+                delivery,
+                result.error or "publisher failed",
+                response_status=result.response_status,
+                retry_after=result.retry_after,
+            )
             publisher_results_total.labels(channel=publisher.channel, outcome="failure").inc()
         self.session.flush()
         return delivery

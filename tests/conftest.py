@@ -5,6 +5,7 @@ import os
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import StaticPool
 
 from app.core.config import settings
 from app.db import models  # noqa: F401
@@ -15,7 +16,12 @@ _skipped_reports = 0
 
 @pytest.fixture()
 def db_session() -> Session:
-    engine = create_engine("sqlite+pysqlite:///:memory:", future=True)
+    engine = create_engine(
+        "sqlite+pysqlite:///:memory:",
+        future=True,
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
     Base.metadata.create_all(engine)
     SessionLocal = sessionmaker(
         bind=engine, autoflush=False, autocommit=False, expire_on_commit=False

@@ -43,6 +43,30 @@ jobs:
           name: quality-artifacts
           path: artifacts
 
+  frontend-quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+        timeout-minutes: 5
+      - run: npm run lint
+        timeout-minutes: 3
+      - run: npm run typecheck
+        timeout-minutes: 3
+      - run: npm run test
+        timeout-minutes: 5
+      - run: npm run build
+        timeout-minutes: 5
+
   postgres-integration:
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -223,6 +247,12 @@ jobs:
         run: |
           curl --fail --show-error --silent http://127.0.0.1:18080/health | tee artifacts/api-health.json
         timeout-minutes: 3
+      - name: Check frontend health
+        run: curl --fail --show-error --silent http://127.0.0.1:18081/health | tee artifacts/frontend-health.txt
+        timeout-minutes: 1
+      - name: Check frontend login page
+        run: curl --fail --show-error --silent http://127.0.0.1:18081/login | grep -q "Web3 News Intel"
+        timeout-minutes: 1
       - run: curl --fail --show-error --silent http://127.0.0.1:18080/metrics > artifacts/metrics.txt
         timeout-minutes: 1
       - run: docker compose exec -T api alembic current --check-heads
@@ -230,6 +260,8 @@ jobs:
       - run: docker compose exec -T api python scripts/validate_sources.py sources.yaml
         timeout-minutes: 2
       - run: docker compose exec -T api python scripts/compose_fixture_e2e.py
+        timeout-minutes: 3
+      - run: docker compose exec -T api python scripts/compose_feishu_e2e.py | tee artifacts/compose-feishu-e2e.json
         timeout-minutes: 3
       - run: docker compose ps
         timeout-minutes: 1

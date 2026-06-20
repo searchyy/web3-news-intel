@@ -25,7 +25,18 @@ def test_ci_workflow_yaml_parses() -> None:
 
 def test_ci_required_jobs_exist_exactly() -> None:
     jobs = _workflow(CI_PATH)["jobs"]
-    assert set(jobs) == REQUIRED_JOBS
+    assert REQUIRED_JOBS.issubset(set(jobs))
+    assert "frontend-quality" in jobs
+
+
+def test_frontend_quality_runs_expected_commands() -> None:
+    commands = _job_run_commands(_workflow(CI_PATH)["jobs"]["frontend-quality"])
+    joined = "\n".join(commands)
+    assert "npm ci" in joined
+    assert "npm run lint" in joined
+    assert "npm run typecheck" in joined
+    assert "npm run test" in joined
+    assert "npm run build" in joined
 
 
 def test_ci_required_jobs_use_ubuntu_latest() -> None:
@@ -65,6 +76,8 @@ def test_compose_acceptance_runs_required_compose_commands() -> None:
     assert any("docker compose build" in command for command in commands)
     assert any("docker compose up -d" in command for command in commands)
     assert any("python scripts/wait_compose_healthy.py" in command for command in commands)
+    assert any("http://127.0.0.1:18081/health" in command for command in commands)
+    assert any("scripts/compose_feishu_e2e.py" in command for command in commands)
 
 
 def test_compose_acceptance_tears_down_even_after_failure() -> None:
