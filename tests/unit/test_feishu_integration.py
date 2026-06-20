@@ -7,7 +7,8 @@ import pytest
 
 from app.db.models import Event
 from app.integrations.feishu.card_renderer import render_event_card, render_event_text
-from app.integrations.feishu.client import FeishuClient
+from app.integrations.feishu.client import FeishuClient, validate_feishu_webhook_url
+from app.integrations.feishu.errors import FeishuConfigurationError
 from app.integrations.feishu.signatures import sign_custom_webhook
 from app.integrations.feishu.token_provider import FeishuTokenProvider
 
@@ -77,6 +78,11 @@ async def test_app_message_payload_and_token_retry(monkeypatch) -> None:
 
 def test_custom_webhook_signing() -> None:
     assert sign_custom_webhook(123, "secret")
+
+
+def test_custom_webhook_url_requires_https() -> None:
+    with pytest.raises(FeishuConfigurationError):
+        validate_feishu_webhook_url("http://open.feishu.cn/blocked-placeholder")
 
 
 def test_card_rendering_escapes_and_bounds() -> None:

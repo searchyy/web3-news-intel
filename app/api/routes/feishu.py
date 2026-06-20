@@ -145,6 +145,8 @@ async def _verified_payload(
     body = await request.body()
     if len(body) > MAX_CALLBACK_BYTES:
         raise HTTPException(status_code=413, detail="callback body too large")
+    if not settings.feishu_verification_token and not settings.feishu_encrypt_key:
+        raise HTTPException(status_code=503, detail="callback verification is not configured")
     if settings.feishu_encrypt_key and x_lark_signature:
         if not verify_event_signature(
             timestamp=x_lark_request_timestamp,

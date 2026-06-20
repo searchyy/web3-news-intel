@@ -19,6 +19,8 @@ jobs:
       FEISHU_TEST_CHAT_ID: ${{ secrets.FEISHU_TEST_CHAT_ID }}
       FEISHU_VERIFICATION_TOKEN: ${{ secrets.FEISHU_VERIFICATION_TOKEN }}
       FEISHU_ENCRYPT_KEY: ${{ secrets.FEISHU_ENCRYPT_KEY }}
+      FIELD_ENCRYPTION_KEY: ${{ secrets.FIELD_ENCRYPTION_KEY }}
+      ADMIN_SESSION_SECRET: ${{ secrets.ADMIN_SESSION_SECRET }}
       REDIS_URL: redis://localhost:6379/0
     services:
       redis:

@@ -14,11 +14,26 @@ export async function api<T>(path: string, options: ApiOptions = {}): Promise<T>
     credentials: "include"
   });
   if (!response.ok) {
-    const text = await response.text();
-    throw new Error(text || `HTTP ${response.status}`);
+    if (response.status === 401 && typeof window !== "undefined") {
+      redirectToLogin();
+      throw new Error("Authentication required");
+    }
+    throw new Error(`HTTP ${response.status}`);
   }
   if (response.status === 204) {
     return undefined as T;
   }
   return (await response.json()) as T;
+}
+
+function redirectToLogin() {
+  if (window.location.pathname === "/login") {
+    return;
+  }
+  if (window.history?.pushState) {
+    window.history.pushState({}, "", "/login");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+    return;
+  }
+  window.location.assign("/login");
 }

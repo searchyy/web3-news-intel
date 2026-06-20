@@ -98,11 +98,11 @@ _login_failures: dict[str, list[float]] = {}
 
 
 def verify_admin_password(username: str, password: str, request: Request) -> bool:
+    if _rate_limited(username, request):
+        raise HTTPException(status_code=429, detail="too many login attempts")
     if username != settings.admin_username or not settings.admin_password_hash:
         _record_failure(username, request)
         return False
-    if _rate_limited(username, request):
-        raise HTTPException(status_code=429, detail="too many login attempts")
     try:
         ok = password_hasher.verify(settings.admin_password_hash, password)
     except VerifyMismatchError:
@@ -111,6 +111,8 @@ def verify_admin_password(username: str, password: str, request: Request) -> boo
         ok = False
     if not ok:
         _record_failure(username, request)
+    else:
+        _clear_failures(username, request)
     return bool(ok)
 
 
@@ -226,3 +228,8 @@ def _rate_limited(username: str, request: Request) -> bool:
     attempts = [item for item in _login_failures.get(key, []) if now - item < 300]
     _login_failures[key] = attempts
     return len(attempts) >= 5
+
+
+def _clear_failures(username: str, request: Request) -> None:
+    key = f"{username}:{ip_hash(request) or 'unknown'}"
+    _login_failures.pop(key, None)

@@ -230,6 +230,8 @@ def result_class(result: FeishuSendResult) -> str:
 
 def validate_feishu_webhook_url(webhook_url: str) -> None:
     parsed = urlparse(webhook_url)
+    if parsed.scheme != "https":
+        raise FeishuConfigurationError("custom Feishu webhook URL must use HTTPS")
     host = (parsed.hostname or "").lower()
     allowed = (
         host == "open.feishu.cn"

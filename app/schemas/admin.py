@@ -87,6 +87,11 @@ class DestinationRead(BaseModel):
     def mask_secret_fingerprint(cls, value: str | None) -> str | None:
         return mask_fingerprint(value)
 
+    @field_validator("config")
+    @classmethod
+    def redact_secret_config(cls, value: dict) -> dict:
+        return _redact_config(value)
+
 
 class RuleBase(BaseModel):
     name: str
@@ -186,3 +191,21 @@ class AuditLogRead(BaseModel):
     request_id: str
     ip_hash: str | None
     created_at: datetime
+
+
+def _redact_config(value: dict) -> dict:
+    blocked = ("secret", "token", "password", "webhook", "authorization", "cookie", "url")
+    redacted = {}
+    for key, item in value.items():
+        lowered = str(key).lower()
+        if any(marker in lowered for marker in blocked):
+            redacted[key] = "[redacted]"
+        elif isinstance(item, dict):
+            redacted[key] = _redact_config(item)
+        elif isinstance(item, list):
+            redacted[key] = [
+                _redact_config(entry) if isinstance(entry, dict) else entry for entry in item
+            ]
+        else:
+            redacted[key] = item
+    return redacted
