@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Self
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
+
+from app.core.i18n import category_label, severity_label, status_label
 
 
 class EventRead(BaseModel):
@@ -29,6 +31,20 @@ class EventRead(BaseModel):
     metadata: dict[str, Any] = Field(
         default_factory=dict, validation_alias=AliasChoices("metadata_", "metadata")
     )
+    display_title: str = ""
+    display_summary: str | None = None
+    category_label: str = ""
+    severity_label: str = ""
+    status_label: str = ""
+
+    @model_validator(mode="after")
+    def hydrate_display_fields(self) -> Self:
+        self.display_title = self.title
+        self.display_summary = self.summary
+        self.category_label = category_label(self.category) or self.category
+        self.severity_label = severity_label(self.severity) or self.severity
+        self.status_label = status_label(self.status) or self.status
+        return self
 
 
 class EventSourceRead(BaseModel):

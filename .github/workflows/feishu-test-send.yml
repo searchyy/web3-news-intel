@@ -1,0 +1,51 @@
+name: Feishu Test Send
+
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+
+jobs:
+  feishu-test-send:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: feishu-test
+    env:
+      FEISHU_ENABLED: "true"
+      FEISHU_SEND_ENABLED: "true"
+      FEISHU_APP_ID: ${{ secrets.FEISHU_APP_ID }}
+      FEISHU_APP_SECRET: ${{ secrets.FEISHU_APP_SECRET }}
+      FEISHU_TEST_CHAT_ID: ${{ secrets.FEISHU_TEST_CHAT_ID }}
+      FEISHU_VERIFICATION_TOKEN: ${{ secrets.FEISHU_VERIFICATION_TOKEN }}
+      FEISHU_ENCRYPT_KEY: ${{ secrets.FEISHU_ENCRYPT_KEY }}
+      FIELD_ENCRYPTION_KEY: ${{ secrets.FIELD_ENCRYPTION_KEY }}
+      ADMIN_SESSION_SECRET: ${{ secrets.ADMIN_SESSION_SECRET }}
+      REDIS_URL: redis://localhost:6379/0
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: mkdir -p artifacts
+      - run: python -m pip install --upgrade pip
+        timeout-minutes: 2
+      - run: python -m pip install -e ".[dev]"
+        timeout-minutes: 3
+      - run: python scripts/feishu_test_send.py > artifacts/feishu-test-send.json
+        timeout-minutes: 2
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: feishu-test-send-artifacts
+          path: artifacts

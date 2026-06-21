@@ -84,7 +84,7 @@ def test_required_ci_workflow_job_names_are_present() -> None:
 
 def test_missing_required_job_name_fails_acceptance() -> None:
     repo = _repo(jobs=("quality",))
-    with pytest.raises(acceptance.AcceptanceError, match="jobs must be exactly"):
+    with pytest.raises(acceptance.AcceptanceError, match="missing required jobs"):
         acceptance.validate_workflows(repo)
 
 
@@ -167,7 +167,9 @@ def _repo(workspace: Path | None = None, *, jobs: tuple[str, ...] | None = None)
     repo = (workspace or _workspace()) / "repo"
     workflow = repo / ".github" / "workflows" / "ci.yml"
     workflow.parent.mkdir(parents=True)
-    job_names = jobs or tuple(sorted(acceptance.REQUIRED_CI_JOBS))
+    job_names = jobs or tuple(
+        sorted(acceptance.REQUIRED_CI_JOBS | acceptance.EXPECTED_OPTIONAL_CI_JOBS)
+    )
     workflow.write_text(_workflow(job_names), encoding="utf-8")
     return repo
 

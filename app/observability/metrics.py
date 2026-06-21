@@ -57,6 +57,47 @@ queue_length = Gauge(
 db_sources = Gauge("web3_news_sources_total", "Configured sources")
 db_events = Gauge("web3_news_events_total", "Stored events")
 db_deliveries = Gauge("web3_news_deliveries_total", "Delivery records")
+feishu_token_refresh_total = Counter(
+    "web3_news_feishu_token_refresh_total",
+    "Feishu tenant token refresh outcomes",
+    ["result"],
+)
+feishu_send_total = Counter(
+    "web3_news_feishu_send_total",
+    "Feishu send outcomes",
+    ["provider", "result"],
+)
+feishu_send_duration_seconds = Histogram(
+    "web3_news_feishu_send_duration_seconds",
+    "Feishu send duration",
+    ["provider", "result"],
+    buckets=(0.1, 0.5, 1, 2.5, 5, 10, 30),
+)
+feishu_callback_total = Counter(
+    "web3_news_feishu_callback_total",
+    "Feishu callback outcomes",
+    ["callback_type", "result"],
+)
+feishu_destination_count = Gauge(
+    "web3_news_feishu_destination_count",
+    "Feishu destination count",
+    ["status"],
+)
+notification_delivery_total = Counter(
+    "web3_news_notification_delivery_total",
+    "Notification delivery outcomes",
+    ["provider", "result"],
+)
+notification_rate_limited_total = Counter(
+    "web3_news_notification_rate_limited_total",
+    "Notification rate limited outcomes",
+    ["provider"],
+)
+notification_digest_total = Counter(
+    "web3_news_notification_digest_total",
+    "Notification digest outcomes",
+    ["provider", "result"],
+)
 
 
 def status_group(status_code: int | None) -> str:

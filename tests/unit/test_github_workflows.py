@@ -9,6 +9,7 @@ import yaml
 ROOT = Path(__file__).resolve().parents[2]
 CI_PATH = ROOT / ".github" / "workflows" / "ci.yml"
 CANARY_PATH = ROOT / ".github" / "workflows" / "live-source-canary.yml"
+FEISHU_TEST_SEND_PATH = ROOT / ".github" / "workflows" / "feishu-test-send.yml"
 REQUIRED_JOBS = {
     "quality",
     "postgres-integration",
@@ -25,7 +26,18 @@ def test_ci_workflow_yaml_parses() -> None:
 
 def test_ci_required_jobs_exist_exactly() -> None:
     jobs = _workflow(CI_PATH)["jobs"]
-    assert set(jobs) == REQUIRED_JOBS
+    assert REQUIRED_JOBS.issubset(set(jobs))
+    assert "frontend-quality" in jobs
+
+
+def test_frontend_quality_runs_expected_commands() -> None:
+    commands = _job_run_commands(_workflow(CI_PATH)["jobs"]["frontend-quality"])
+    joined = "\n".join(commands)
+    assert "npm ci" in joined
+    assert "npm run lint" in joined
+    assert "npm run typecheck" in joined
+    assert "npm run test" in joined
+    assert "npm run build" in joined
 
 
 def test_ci_required_jobs_use_ubuntu_latest() -> None:
@@ -65,6 +77,8 @@ def test_compose_acceptance_runs_required_compose_commands() -> None:
     assert any("docker compose build" in command for command in commands)
     assert any("docker compose up -d" in command for command in commands)
     assert any("python scripts/wait_compose_healthy.py" in command for command in commands)
+    assert any("http://127.0.0.1:18081/health" in command for command in commands)
+    assert any("scripts/compose_feishu_e2e.py" in command for command in commands)
 
 
 def test_compose_acceptance_tears_down_even_after_failure() -> None:
@@ -84,10 +98,18 @@ def test_workflow_has_least_privilege_permissions() -> None:
     assert workflow["permissions"] == {"contents": "read"}
     canary = _workflow(CANARY_PATH)
     assert canary["permissions"] == {"contents": "read"}
+    feishu = _workflow(FEISHU_TEST_SEND_PATH)
+    assert feishu["permissions"] == {"contents": "read"}
 
 
 def test_workflows_have_no_hardcoded_secret_values() -> None:
-    text = CI_PATH.read_text(encoding="utf-8") + "\n" + CANARY_PATH.read_text(encoding="utf-8")
+    text = (
+        CI_PATH.read_text(encoding="utf-8")
+        + "\n"
+        + CANARY_PATH.read_text(encoding="utf-8")
+        + "\n"
+        + FEISHU_TEST_SEND_PATH.read_text(encoding="utf-8")
+    )
     forbidden = [
         r"ghp_[A-Za-z0-9_]{20,}",
         r"github_pat_[A-Za-z0-9_]{20,}",
@@ -99,7 +121,13 @@ def test_workflows_have_no_hardcoded_secret_values() -> None:
 
 
 def test_workflows_have_no_absolute_local_filesystem_paths() -> None:
-    text = CI_PATH.read_text(encoding="utf-8") + "\n" + CANARY_PATH.read_text(encoding="utf-8")
+    text = (
+        CI_PATH.read_text(encoding="utf-8")
+        + "\n"
+        + CANARY_PATH.read_text(encoding="utf-8")
+        + "\n"
+        + FEISHU_TEST_SEND_PATH.read_text(encoding="utf-8")
+    )
     assert re.search(r"[A-Za-z]:\\", text) is None
     assert "/Users/" not in text
     assert "/home/" not in text
@@ -139,6 +167,31 @@ def test_canary_is_separate_from_deterministic_release_gate_tests() -> None:
     assert "pytest tests/unit" not in joined
     assert "pytest tests/integration" not in joined
     assert "pre_push_acceptance.py" not in joined
+
+
+def test_feishu_test_send_workflow_is_manual_and_secret_backed() -> None:
+    workflow = _workflow(FEISHU_TEST_SEND_PATH)
+    triggers = workflow["on"]
+    assert "workflow_dispatch" in triggers
+    assert "pull_request" not in triggers
+    assert "push" not in triggers
+    job = workflow["jobs"]["feishu-test-send"]
+    assert job["environment"] == "feishu-test"
+    assert int(job["timeout-minutes"]) > 0
+    env = job["env"]
+    for name in (
+        "FEISHU_APP_ID",
+        "FEISHU_APP_SECRET",
+        "FEISHU_TEST_CHAT_ID",
+        "FEISHU_VERIFICATION_TOKEN",
+        "FEISHU_ENCRYPT_KEY",
+        "FIELD_ENCRYPTION_KEY",
+        "ADMIN_SESSION_SECRET",
+    ):
+        assert env[name].startswith("${{ secrets.")
+    commands = "\n".join(_job_run_commands(job))
+    assert "scripts/feishu_test_send.py" in commands
+    assert "pre_push_acceptance.py" not in commands
 
 
 def _workflow(path: Path) -> dict[str, Any]:

@@ -27,6 +27,8 @@ docker compose down -v --remove-orphans
 
 Compose includes health checks for PostgreSQL (`pg_isready`), Redis (`redis-cli ping`), FastAPI (`/health`), Celery worker heartbeat, and scheduler startup. API waits for PostgreSQL and Redis. Worker and scheduler wait for healthy PostgreSQL, Redis, and API. The host API port is controlled by `APP_PORT` and defaults to `18080`.
 
+The visual administration frontend is served by the `frontend` Compose service. The host frontend port is controlled by `FRONTEND_PORT` and defaults to `18081`.
+
 ## Database Migration
 
 ```bash
@@ -100,9 +102,25 @@ TELEGRAM_CHAT_ID=...
 
 Webhook deliveries include `X-Webhook-Signature` when `ALERT_WEBHOOK_SECRET` is set. Delivery records are idempotent by event/channel/target.
 
+## Feishu Integration
+
+Feishu enterprise application bot mode is the production mode. Custom webhook mode is outbound-only compatibility mode.
+
+Safe defaults:
+
+- `FEISHU_ENABLED=false`
+- `FEISHU_SEND_ENABLED=false`
+- webhook URLs are encrypted with `FIELD_ENCRYPTION_KEY`
+- app secrets remain in environment variables or a secret manager
+- newly enabled groups do not receive historical events automatically
+
+See [docs/FEISHU_SETUP.md](docs/FEISHU_SETUP.md).
+
 ## Admin Authentication
 
-All `/admin/*` routes require `X-Admin-Token` and a configured `ADMIN_TOKEN`. Token comparison uses constant-time comparison. If `ADMIN_TOKEN` is unset, admin routes return `503`.
+Legacy `/admin/*` routes require `X-Admin-Token` and a configured `ADMIN_TOKEN`. Token comparison uses constant-time comparison. If `ADMIN_TOKEN` is unset, admin routes return `503`.
+
+The visual administration panel uses `/api/admin/auth/login`, Argon2 password verification, server-side sessions, HttpOnly cookies, and CSRF protection. Browser localStorage is not used for admin tokens. See [docs/ADMIN_PANEL.md](docs/ADMIN_PANEL.md).
 
 ## Troubleshooting
 

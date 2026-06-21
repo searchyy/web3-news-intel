@@ -3,11 +3,15 @@ from __future__ import annotations
 import asyncio
 
 from app.core.config import settings
+from app.core.field_encryption import FieldEncryptor
 from app.db.repositories.event_repo import EventRepository
+from app.db.repositories.notification_repo import NotificationRepository
 from app.db.session import SessionLocal
 from app.pipeline.alert_rules import AlertEngine
+from app.pipeline.destination_router import DestinationRouter
 from app.publishers.base import DeliveryManager
 from app.publishers.discord import DiscordPublisher
+from app.publishers.feishu import publish_feishu_once
 from app.publishers.telegram import TelegramPublisher
 from app.publishers.webhook import WebhookPublisher
 from app.workers.celery_app import celery_app
@@ -31,6 +35,24 @@ async def _republish_event(event_id: int) -> dict[str, int | str]:
         deliveries = 0
         for publisher in publishers:
             await manager.publish_once(event, publisher)
+            deliveries += 1
+        router = DestinationRouter(session)
+        encryptor = (
+            FieldEncryptor(settings.field_encryption_key)
+            if settings.field_encryption_key
+            else None
+        )
+        for destination in NotificationRepository(session).active_destinations():
+            decision = router.should_route(event, destination)
+            if not decision.should_send:
+                continue
+            await publish_feishu_once(
+                session,
+                event,
+                destination,
+                encryptor=encryptor,
+                delivery_variant=decision.delivery_mode,
+            )
             deliveries += 1
         session.commit()
         return {"status": "published", "deliveries": deliveries}

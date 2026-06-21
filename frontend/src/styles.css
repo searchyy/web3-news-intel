@@ -1,0 +1,42 @@
+body {
+  margin: 0;
+  background: #f4f6f8;
+}
+
+.app-shell {
+  min-height: 100vh;
+}
+
+.brand {
+  color: #fff !important;
+  margin: 18px 20px !important;
+}
+
+.topbar {
+  background: #fff;
+  border-bottom: 1px solid #edf0f2;
+  font-weight: 600;
+}
+
+.content {
+  padding: 20px;
+}
+
+.section {
+  margin-top: 16px;
+}
+
+.toolbar {
+  margin-bottom: 16px;
+}
+
+.login-page {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  background: #f4f6f8;
+}
+
+.login-card {
+  width: min(420px, calc(100vw - 32px));
+}

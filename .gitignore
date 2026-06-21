@@ -12,6 +12,7 @@ tests/_pytest_tmp/
 tests/_acceptance_tmp/
 .mypy_cache/
 .ruff_cache/
+node_modules/
 .coverage
 htmlcov/
 *.db
@@ -23,6 +24,7 @@ htmlcov/
 *.log
 celerybeat-schedule
 artifacts/
+reports/
 .idea/
 .vscode/
 dist/
