@@ -26,8 +26,62 @@ body {
   margin-top: 16px;
 }
 
+.page-stack {
+  width: 100%;
+}
+
+.page-title-row {
+  width: 100%;
+  justify-content: space-between;
+}
+
 .toolbar {
   margin-bottom: 16px;
+}
+
+.event-search-card .ant-card-body {
+  padding: 16px;
+}
+
+.event-search-toolbar {
+  width: 100%;
+}
+
+.event-search-input {
+  width: min(560px, 100%);
+}
+
+.event-q-mode,
+.saved-search-select {
+  width: 160px;
+}
+
+.saved-search-row {
+  margin-top: 12px;
+}
+
+.event-title-cell {
+  max-width: 460px;
+}
+
+.event-title-link {
+  height: auto;
+  padding: 0;
+  text-align: left;
+  white-space: normal;
+}
+
+.detail-list {
+  margin: 8px 0 0;
+  padding-left: 20px;
+}
+
+.time-filter-grid .ant-form-item,
+.filter-sort-select,
+.filter-direction-select,
+.ai-model-select,
+.ai-severity-select {
+  min-width: 180px;
 }
 
 .login-page {

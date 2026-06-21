@@ -1,18 +1,26 @@
-import ReactECharts from "echarts-for-react";
 import { Card, Col, Row, Skeleton, Statistic, Typography } from "antd";
 import { useQuery } from "@tanstack/react-query";
+import { lazy, Suspense, useMemo } from "react";
 import { api } from "../api/client";
 import type { DashboardSummary } from "../types/api";
+
+const ReactECharts = lazy(() => import("echarts-for-react"));
 
 export function DashboardPage() {
   const { data, isLoading } = useQuery({
     queryKey: ["dashboard-summary"],
-    queryFn: () => api<DashboardSummary>("/api/admin/dashboard/summary")
+    queryFn: () => api<DashboardSummary>("/api/admin/dashboard/summary"),
+    staleTime: 30_000
   });
   if (isLoading || !data) {
     return <Skeleton active />;
   }
-  const chart = {
+  return <DashboardContent data={data} />;
+}
+
+function DashboardContent({ data }: { data: DashboardSummary }) {
+  const chart = useMemo(
+    () => ({
     tooltip: {},
     xAxis: { type: "category", data: ["1 小时事件", "24 小时事件", "高危事件", "成功投递", "失败投递"] },
     yAxis: { type: "value" },
@@ -28,7 +36,9 @@ export function DashboardPage() {
         ]
       }
     ]
-  };
+  }),
+    [data]
+  );
   return (
     <>
       <Typography.Title level={3}>控制台</Typography.Title>
@@ -41,7 +51,9 @@ export function DashboardPage() {
         <Metric title="待审批飞书群" value={data.pending_feishu_groups} />
       </Row>
       <Card className="section" title="事件与投递概览">
-        <ReactECharts option={chart} style={{ height: 320 }} />
+        <Suspense fallback={<Skeleton active paragraph={{ rows: 4 }} />}>
+          <ReactECharts option={chart} style={{ height: 320 }} />
+        </Suspense>
       </Card>
     </>
   );

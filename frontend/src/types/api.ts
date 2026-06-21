@@ -17,6 +17,13 @@ export type EventRow = {
   status: string;
   trust_score: number;
   symbols: string[];
+  chains?: string[];
+  entities?: string[];
+  source_key?: string;
+  source_name?: string;
+  source_group?: string;
+  language?: string;
+  official?: boolean;
   published_at?: string;
   first_seen_at: string;
   primary_url?: string;
@@ -25,6 +32,70 @@ export type EventRow = {
   category_label?: string;
   severity_label?: string;
   status_label?: string;
+  ai_summary_status?: string;
+  ai_headline_zh?: string;
+  ai_summary_zh?: string;
+  ai_importance_score?: number;
+  ai_risk_level?: string;
+  ai_tags?: string[];
+  has_ai_summary?: boolean;
+};
+export type PaginatedResponse<T> = {
+  items: T[];
+  total: number;
+  page: number;
+  page_size: number;
+};
+export type FacetOption = {
+  value: string;
+  label?: string;
+  count?: number;
+};
+export type EventFacets = {
+  source_keys?: FacetOption[];
+  source_groups?: FacetOption[];
+  categories?: FacetOption[];
+  severities?: FacetOption[];
+  statuses?: FacetOption[];
+  symbols?: FacetOption[];
+  chains?: FacetOption[];
+  languages?: FacetOption[];
+};
+export type SavedSearch = {
+  id: string;
+  name: string;
+  filters: Record<string, unknown>;
+  created_at?: string;
+  updated_at?: string;
+};
+export type EventAiInsight = {
+  id?: string;
+  event_id: number;
+  provider: string;
+  model: string;
+  prompt_version?: string;
+  headline_zh?: string;
+  summary_zh?: string;
+  key_facts?: unknown[];
+  entities?: unknown[];
+  symbols?: string[];
+  chains?: string[];
+  event_type?: string;
+  importance_score?: number;
+  risk_level?: string;
+  sentiment?: string;
+  market_impact?: string;
+  facts?: unknown[];
+  inferences?: unknown[];
+  confidence?: number;
+  source_event_ids?: number[];
+  source_urls?: string[];
+  generated_at?: string;
+  status?: string;
+  error_sanitized?: string;
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  total_tokens?: number;
 };
 export type SourceRow = {
   id: number;
@@ -34,6 +105,58 @@ export type SourceRow = {
   enabled: boolean;
   poll_seconds: number;
   access_denied_reason?: string;
+};
+export type AiProviderConfig = {
+  provider: "deepseek";
+  enabled: boolean;
+  auto_process_enabled: boolean;
+  api_base?: string;
+  configured?: boolean;
+  api_key_masked?: string | null;
+  model?: string | null;
+  timeout_seconds?: number;
+  max_concurrency?: number;
+  max_tokens?: number;
+  temperature?: number;
+  thinking_enabled?: boolean;
+  daily_token_budget?: number;
+  daily_request_budget?: number;
+  auto_minimum_severity?: string;
+  last_tested_at?: string | null;
+  last_test_status?: string | null;
+  last_error_sanitized?: string | null;
+  usage_today?: {
+    prompt_tokens?: number;
+    completion_tokens?: number;
+    total_tokens?: number;
+    request_count?: number;
+    failure_count?: number;
+  };
+};
+export type AiModelInfo = {
+  id: string;
+  name?: string;
+};
+export type AiModelsResponse = {
+  models?: Array<string | AiModelInfo>;
+  data?: Array<string | AiModelInfo>;
+};
+export type AiRun = {
+  id: string;
+  job_type: string;
+  provider: string;
+  model?: string;
+  event_count?: number;
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  estimated_cost?: number;
+  latency_ms?: number;
+  status: string;
+  retry_count?: number;
+  error_code?: string;
+  error_sanitized?: string;
+  created_at: string;
+  finished_at?: string;
 };
 export type Destination = {
   id: string;

@@ -4,6 +4,7 @@ import {
   DashboardOutlined,
   DatabaseOutlined,
   MessageOutlined,
+  RobotOutlined,
   SendOutlined,
   SettingOutlined,
   ThunderboltOutlined
@@ -42,6 +43,11 @@ export function AdminLayout() {
               key: "/settings/feishu",
               icon: <SettingOutlined />,
               label: <Link to="/settings/feishu">飞书配置</Link>
+            },
+            {
+              key: "/settings/ai",
+              icon: <RobotOutlined />,
+              label: <Link to="/settings/ai">AI 智能整理</Link>
             },
             { key: "/system", icon: <SettingOutlined />, label: <Link to="/system">系统设置</Link> },
             { key: "/audit", icon: <AuditOutlined />, label: <Link to="/audit">审计日志</Link> }
