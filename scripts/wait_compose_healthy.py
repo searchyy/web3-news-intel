@@ -43,6 +43,7 @@ def main(argv: list[str] | None = None) -> int:
                     print(f"- {service}: {last_status[service]}")
                 return 0
             if time.monotonic() >= deadline:
+                _emit_github_error(last_status, missing=missing, unhealthy=unhealthy)
                 print(
                     "Timed out waiting for compose health: "
                     f"{last_status}; missing={missing}; unhealthy={unhealthy}",
@@ -96,6 +97,17 @@ def _compose_services() -> list[dict[str, Any]]:
             raise RuntimeError("invalid docker compose JSON output") from exc
         return services
     raise RuntimeError("unexpected docker compose ps JSON output")
+
+
+def _emit_github_error(
+    last_status: dict[str, str], *, missing: list[str], unhealthy: list[str]
+) -> None:
+    payload = json.dumps(
+        {"status": last_status, "missing": missing, "unhealthy": unhealthy},
+        sort_keys=True,
+    )
+    sanitized = payload.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+    print(f"::error title=Compose health timeout::{sanitized}", file=sys.stderr)
 
 
 def _status_by_service(services: list[dict[str, Any]]) -> dict[str, str]:

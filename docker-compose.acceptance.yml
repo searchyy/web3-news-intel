@@ -64,6 +64,12 @@ services:
         condition: service_healthy
 
   worker:
+    command: >
+      celery -A app.workers.celery_app worker
+      --hostname=worker@%h
+      --pool=solo
+      --concurrency=1
+      --loglevel=INFO
     environment:
       <<: *acceptance-env
       COMPOSE_E2E_API_BASE: ""
@@ -71,6 +77,16 @@ services:
       COMPOSE_E2E_MOCK_DEEPSEEK_BASE: ""
       COMPOSE_E2E_MOCK_FEISHU_BASE: ""
       COMPOSE_E2E_ADMIN_PASSWORD: ""
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "celery -A app.workers.celery_app inspect ping --timeout=5 | grep -q pong",
+        ]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 30s
     depends_on:
       postgres:
         condition: service_healthy
