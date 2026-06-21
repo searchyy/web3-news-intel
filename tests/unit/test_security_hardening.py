@@ -107,6 +107,18 @@ def test_local_admin_cookie_is_not_secure_by_default(monkeypatch) -> None:
     assert settings.admin_secure_cookie is False
 
 
+def test_feishu_allowed_chat_ids_accept_csv_env_value(monkeypatch) -> None:
+    monkeypatch.setenv("FEISHU_ALLOWED_CHAT_IDS", "oc_one, oc_two")
+    settings = Settings(_env_file=None)
+    assert settings.feishu_allowed_chat_ids == ["oc_one", "oc_two"]
+
+
+def test_feishu_allowed_chat_ids_accept_json_env_value(monkeypatch) -> None:
+    monkeypatch.setenv("FEISHU_ALLOWED_CHAT_IDS", '["oc_one", "oc_two"]')
+    settings = Settings(_env_file=None)
+    assert settings.feishu_allowed_chat_ids == ["oc_one", "oc_two"]
+
+
 def test_production_requires_secure_admin_cookie(monkeypatch) -> None:
     monkeypatch.setenv("APP_ENV", "production")
     monkeypatch.setenv("ADMIN_USERNAME", "admin")

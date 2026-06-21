@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 import yaml
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 from app.core.url_security import validate_public_http_url
 
@@ -78,7 +79,7 @@ class Settings(BaseSettings):
     feishu_encrypt_key: str | None = None
     feishu_api_base: str = "https://open.feishu.cn"
     feishu_test_chat_id: str | None = None
-    feishu_allowed_chat_ids: list[str] = Field(default_factory=list)
+    feishu_allowed_chat_ids: Annotated[list[str], NoDecode] = Field(default_factory=list)
     feishu_default_delivery_mode: Literal["immediate", "digest"] = "immediate"
     feishu_max_messages_per_group_per_hour: int = Field(default=30, ge=1, le=500)
     field_encryption_key: str | None = None
@@ -98,7 +99,16 @@ class Settings(BaseSettings):
         if value is None or value == "":
             return []
         if isinstance(value, str):
-            return [item.strip() for item in value.split(",") if item.strip()]
+            stripped = value.strip()
+            if stripped.startswith("["):
+                try:
+                    parsed = json.loads(stripped)
+                except json.JSONDecodeError as exc:
+                    raise ValueError("FEISHU_ALLOWED_CHAT_IDS JSON array is invalid") from exc
+                if not isinstance(parsed, list):
+                    raise ValueError("FEISHU_ALLOWED_CHAT_IDS JSON value must be a list")
+                return [str(item).strip() for item in parsed if str(item).strip()]
+            return [item.strip() for item in stripped.split(",") if item.strip()]
         if isinstance(value, list):
             return [str(item).strip() for item in value if str(item).strip()]
         raise ValueError("FEISHU_ALLOWED_CHAT_IDS must be a comma-separated string or list")
