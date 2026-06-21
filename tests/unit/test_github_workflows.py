@@ -11,6 +11,8 @@ CI_PATH = ROOT / ".github" / "workflows" / "ci.yml"
 AI_MOCK_PATH = ROOT / ".github" / "workflows" / "ai-integration-mock.yml"
 CANARY_PATH = ROOT / ".github" / "workflows" / "live-source-canary.yml"
 FEISHU_TEST_SEND_PATH = ROOT / ".github" / "workflows" / "feishu-test-send.yml"
+FRONTEND_DOCKERFILE_PATH = ROOT / "frontend" / "Dockerfile"
+COMPOSE_PATH = ROOT / "docker-compose.yml"
 REQUIRED_JOBS = {
     "quality",
     "postgres-integration",
@@ -39,6 +41,16 @@ def test_frontend_quality_runs_expected_commands() -> None:
     assert "npm run typecheck" in joined
     assert "npm run test" in joined
     assert "npm run build" in joined
+
+
+def test_frontend_container_healthcheck_uses_installed_curl() -> None:
+    dockerfile = FRONTEND_DOCKERFILE_PATH.read_text(encoding="utf-8")
+    compose = COMPOSE_PATH.read_text(encoding="utf-8")
+    assert "apk add --no-cache curl" in dockerfile
+    assert "curl --fail --silent http://localhost:8080/health" in dockerfile
+    assert "curl --fail --silent http://localhost:8080/health" in compose
+    assert "wget -qO-" not in dockerfile
+    assert "wget -qO-" not in compose
 
 
 def test_ci_required_jobs_use_ubuntu_latest() -> None:

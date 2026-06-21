@@ -8,7 +8,9 @@ RUN npm run build
 
 FROM nginx:1.27-alpine
 
+RUN apk add --no-cache curl
+
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /frontend/dist /usr/share/nginx/html
 
-HEALTHCHECK --interval=10s --timeout=5s --retries=20 CMD wget -qO- http://localhost:8080/health || exit 1
+HEALTHCHECK --interval=10s --timeout=5s --retries=20 CMD curl --fail --silent http://localhost:8080/health || exit 1
