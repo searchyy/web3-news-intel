@@ -11,6 +11,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     Text,
     UniqueConstraint,
@@ -135,6 +136,13 @@ class RawDocument(Base):
 
 class Event(Base):
     __tablename__ = "events"
+    __table_args__ = (
+        Index("ix_events_first_seen_at", "first_seen_at"),
+        Index("ix_events_last_seen_at", "last_seen_at"),
+        Index("ix_events_trust_score", "trust_score"),
+        Index("ix_events_status_severity_first_seen", "status", "severity", "first_seen_at"),
+        Index("ix_events_category_first_seen", "category", "first_seen_at"),
+    )
 
     id: Mapped[int] = mapped_column(BigIntPk, primary_key=True, autoincrement=True)
     event_key: Mapped[str] = mapped_column(Text, unique=True, nullable=False, index=True)
@@ -185,7 +193,11 @@ class SavedSearch(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+        index=True,
     )
 
 
@@ -482,6 +494,7 @@ class EventSource(Base):
     __tablename__ = "event_sources"
     __table_args__ = (
         UniqueConstraint("event_id", "source_id", "url", name="uq_event_sources_event_source_url"),
+        Index("ix_event_sources_source_event", "source_id", "event_id"),
     )
 
     id: Mapped[int] = mapped_column(BigIntPk, primary_key=True, autoincrement=True)
