@@ -8,6 +8,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 CI_PATH = ROOT / ".github" / "workflows" / "ci.yml"
+AI_MOCK_PATH = ROOT / ".github" / "workflows" / "ai-integration-mock.yml"
 CANARY_PATH = ROOT / ".github" / "workflows" / "live-source-canary.yml"
 FEISHU_TEST_SEND_PATH = ROOT / ".github" / "workflows" / "feishu-test-send.yml"
 REQUIRED_JOBS = {
@@ -75,14 +76,24 @@ def test_real_service_jobs_set_fail_on_skip() -> None:
     assert jobs["redis-celery-integration"]["env"]["PYTEST_FAIL_ON_SKIP"] == "1"
 
 
+def test_ai_mock_workflow_fails_on_skips_without_running_worker_tests() -> None:
+    job = _workflow(AI_MOCK_PATH)["jobs"]["ai-integration-mock"]
+    assert job["env"]["PYTEST_FAIL_ON_SKIP"] == "1"
+    commands = "\n".join(_job_run_commands(job))
+    assert '-m "not redis and not celery"' in commands
+
+
 def test_compose_acceptance_runs_required_compose_commands() -> None:
-    commands = _job_run_commands(_workflow(CI_PATH)["jobs"]["compose-acceptance"])
+    job = _workflow(CI_PATH)["jobs"]["compose-acceptance"]
+    commands = _job_run_commands(job)
+    assert job["env"]["COMPOSE_FILE"] == "docker-compose.yml:docker-compose.acceptance.yml"
     assert any("docker compose config --quiet" in command for command in commands)
     assert any("docker compose build" in command for command in commands)
     assert any("docker compose up -d" in command for command in commands)
     assert any("python scripts/wait_compose_healthy.py" in command for command in commands)
+    assert any("mock-deepseek" in command and "mock-feishu" in command for command in commands)
     assert any("http://127.0.0.1:18081/health" in command for command in commands)
-    assert any("scripts/compose_feishu_e2e.py" in command for command in commands)
+    assert any("scripts/compose_full_mock_e2e.py" in command for command in commands)
 
 
 def test_compose_acceptance_tears_down_even_after_failure() -> None:

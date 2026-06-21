@@ -12,7 +12,12 @@ from app.core.field_encryption import FieldEncryptor
 from app.db.models import Event
 from app.integrations.ai.base import AIMessage
 from app.integrations.ai.deepseek.client import DeepSeekClient
-from app.integrations.ai.deepseek.errors import AIBudgetExceededError
+from app.integrations.ai.deepseek.errors import (
+    AIBudgetExceededError,
+    AIRateLimitedError,
+    AITimeoutError,
+    AITransientError,
+)
 from app.integrations.ai.service import AIService, build_event_input, provider_config_to_public_dict
 
 
@@ -64,6 +69,59 @@ async def test_deepseek_client_lists_models_and_sends_chat_request() -> None:
     assert seen["chat_payload"]["thinking"] == {"enabled": True}
     assert result.prompt_tokens == 11
     assert result.completion_tokens == 7
+
+
+@pytest.mark.asyncio
+async def test_deepseek_client_maps_429_to_retryable_rate_limit() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(429, headers={"retry-after": "7"}, request=request)
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    deepseek = DeepSeekClient(
+        api_base="https://api.deepseek.com",
+        api_key="sk-test",
+        timeout_seconds=5,
+        client=client,
+    )
+    with pytest.raises(AIRateLimitedError) as exc_info:
+        await deepseek.list_models()
+    await client.aclose()
+
+    assert exc_info.value.retryable is True
+    assert exc_info.value.retry_after_seconds == 7
+
+
+@pytest.mark.asyncio
+async def test_deepseek_client_maps_5xx_and_timeout_to_retryable_errors() -> None:
+    def transient_handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(503, request=request)
+
+    transient_client = httpx.AsyncClient(transport=httpx.MockTransport(transient_handler))
+    transient = DeepSeekClient(
+        api_base="https://api.deepseek.com",
+        api_key="sk-test",
+        timeout_seconds=5,
+        client=transient_client,
+    )
+    with pytest.raises(AITransientError) as transient_exc:
+        await transient.list_models()
+    await transient_client.aclose()
+    assert transient_exc.value.retryable is True
+
+    def timeout_handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("timeout", request=request)
+
+    timeout_client = httpx.AsyncClient(transport=httpx.MockTransport(timeout_handler))
+    timeout = DeepSeekClient(
+        api_base="https://api.deepseek.com",
+        api_key="sk-test",
+        timeout_seconds=5,
+        client=timeout_client,
+    )
+    with pytest.raises(AITimeoutError) as timeout_exc:
+        await timeout.list_models()
+    await timeout_client.aclose()
+    assert timeout_exc.value.retryable is True
 
 
 @pytest.mark.asyncio

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import socket
 
@@ -7,10 +8,13 @@ import httpx
 import pytest
 from fastapi import HTTPException
 
-from app.core.config import Settings, SourceConfig
+from app.core.config import Settings, SourceConfig, settings
 from app.core.errors import FetchError
 from app.core.security import require_admin
 from app.core.url_security import validate_public_http_url
+from app.integrations.ai.settings import validate_deepseek_api_base
+from app.integrations.feishu.client import FeishuClient
+from app.integrations.feishu.errors import FeishuConfigurationError
 from app.publishers.webhook import WebhookPublisher
 
 
@@ -111,6 +115,37 @@ def test_production_requires_secure_admin_cookie(monkeypatch) -> None:
     monkeypatch.setenv("ADMIN_SECURE_COOKIE", "false")
     with pytest.raises(ValueError, match="ADMIN_SECURE_COOKIE"):
         Settings(_env_file=None)
+
+
+def test_deepseek_mock_http_requires_acceptance_flag() -> None:
+    with pytest.raises(ValueError, match="HTTPS"):
+        validate_deepseek_api_base(
+            "http://mock-deepseek:9001",
+            allow_custom=True,
+            allow_acceptance_mock=False,
+        )
+    assert (
+        validate_deepseek_api_base(
+            "http://mock-deepseek:9001",
+            allow_custom=True,
+            allow_acceptance_mock=True,
+        )
+        == "http://mock-deepseek:9001"
+    )
+
+
+def test_feishu_mock_http_requires_acceptance_mode(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "app_env", "local")
+    monkeypatch.setattr(settings, "enable_acceptance_tasks", False)
+    monkeypatch.setattr(settings, "acceptance_mock_http_enabled", False)
+    with pytest.raises(FeishuConfigurationError, match="HTTPS"):
+        FeishuClient(api_base="http://mock-feishu:9002")
+
+    monkeypatch.setattr(settings, "app_env", "ci")
+    monkeypatch.setattr(settings, "enable_acceptance_tasks", True)
+    monkeypatch.setattr(settings, "acceptance_mock_http_enabled", True)
+    client = FeishuClient(api_base="http://mock-feishu:9002")
+    asyncio.run(client.aclose())
 
 
 @pytest.mark.parametrize(

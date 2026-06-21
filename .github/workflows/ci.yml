@@ -235,6 +235,8 @@ jobs:
   compose-acceptance:
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    env:
+      COMPOSE_FILE: docker-compose.yml:docker-compose.acceptance.yml
     steps:
       - uses: actions/checkout@v4
       - run: mkdir -p artifacts
@@ -246,7 +248,9 @@ jobs:
       - run: docker compose up -d
         timeout-minutes: 5
       - name: Wait for Compose service health
-        run: python scripts/wait_compose_healthy.py --timeout 180
+        run: >
+          python scripts/wait_compose_healthy.py --timeout 240
+          --services postgres,redis,mock-deepseek,mock-feishu,api,worker,scheduler,frontend
         timeout-minutes: 4
       - name: Check API health
         run: |
@@ -264,10 +268,11 @@ jobs:
         timeout-minutes: 1
       - run: docker compose exec -T api python scripts/validate_sources.py sources.yaml
         timeout-minutes: 2
-      - run: docker compose exec -T api python scripts/compose_fixture_e2e.py
-        timeout-minutes: 3
-      - run: docker compose exec -T api python scripts/compose_feishu_e2e.py | tee artifacts/compose-feishu-e2e.json
-        timeout-minutes: 3
+      - name: Run full Compose mock E2E
+        run: >
+          docker compose exec -T api python scripts/compose_full_mock_e2e.py
+          | tee artifacts/compose-full-mock-e2e.json
+        timeout-minutes: 6
       - run: docker compose ps
         timeout-minutes: 1
       - if: always()

@@ -34,7 +34,7 @@ class FeishuClient:
         max_retries: int = 3,
     ) -> None:
         self.api_base = (api_base or settings.feishu_api_base).rstrip("/")
-        validate_public_http_url(self.api_base, resolve_dns=False)
+        _validate_feishu_api_base(self.api_base)
         self.token_provider = token_provider
         self.max_response_bytes = max_response_bytes
         self.max_retries = max_retries
@@ -127,7 +127,7 @@ class FeishuClient:
         headers: dict[str, str],
         invalidate_token_on_auth_error: bool = False,
     ) -> FeishuSendResult:
-        target = validate_public_http_url(url, resolve_dns=settings.http_validate_dns_rebinding)
+        target = _validate_feishu_request_url(url)
         current_url = target.url
         for attempt in range(1, self.max_retries + 2):
             started = asyncio.get_running_loop().time()
@@ -139,10 +139,7 @@ class FeishuClient:
                 )
             if 300 <= response.status_code < 400 and response.headers.get("location"):
                 current_url = urljoin(current_url, response.headers["location"])
-                validate_public_http_url(
-                    current_url,
-                    resolve_dns=settings.http_validate_dns_rebinding,
-                )
+                _validate_feishu_request_url(current_url)
                 continue
             retry_after = parse_retry_after(response.headers.get("Retry-After"))
             elapsed = asyncio.get_running_loop().time() - started
@@ -241,3 +238,27 @@ def validate_feishu_webhook_url(webhook_url: str) -> None:
     if not allowed:
         raise FeishuConfigurationError("custom Feishu webhook URL host is not allowed")
     validate_public_http_url(webhook_url, resolve_dns=settings.http_validate_dns_rebinding)
+
+
+def _acceptance_mock_feishu_url(url: str) -> bool:
+    parsed = urlparse(url)
+    return bool(
+        settings.acceptance_mock_http_allowed
+        and parsed.scheme == "http"
+        and (parsed.hostname or "").lower() == "mock-feishu"
+    )
+
+
+def _validate_feishu_api_base(api_base: str) -> None:
+    if _acceptance_mock_feishu_url(api_base):
+        validate_public_http_url(api_base, resolve_dns=False)
+        return
+    if not api_base.startswith("https://"):
+        raise FeishuConfigurationError("Feishu API Base must use HTTPS")
+    validate_public_http_url(api_base, resolve_dns=False)
+
+
+def _validate_feishu_request_url(url: str):
+    if _acceptance_mock_feishu_url(url):
+        return validate_public_http_url(url, resolve_dns=False)
+    return validate_public_http_url(url, resolve_dns=settings.http_validate_dns_rebinding)

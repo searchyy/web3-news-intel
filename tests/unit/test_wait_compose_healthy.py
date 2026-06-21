@@ -39,6 +39,28 @@ def test_missing_required_service_returns_failure(monkeypatch, capsys) -> None:
     assert "worker" in capsys.readouterr().err
 
 
+def test_custom_required_services_are_checked(monkeypatch, capsys) -> None:
+    services = _services("healthy") + [
+        {"Service": "mock-deepseek", "Health": "healthy"},
+        {"Service": "mock-feishu", "Health": "healthy"},
+    ]
+    monkeypatch.setattr(waiter.subprocess, "run", _runner([json.dumps(services)]))
+    assert (
+        waiter.main(
+            [
+                "--timeout",
+                "0",
+                "--services",
+                "postgres,redis,mock-deepseek,mock-feishu",
+            ]
+        )
+        == 0
+    )
+    output = capsys.readouterr().out
+    assert "mock-deepseek" in output
+    assert "mock-feishu" in output
+
+
 def test_docker_executable_missing_returns_clear_failure(monkeypatch, capsys) -> None:
     def fake_run(*_args, **_kwargs):
         raise FileNotFoundError(2, "missing", "docker")

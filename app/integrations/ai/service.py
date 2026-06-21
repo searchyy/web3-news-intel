@@ -3,9 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-import threading
 import time
-from contextlib import contextmanager
 from datetime import UTC, datetime
 from typing import Any
 
@@ -27,12 +25,11 @@ from app.db.models import (
 from app.integrations.ai.base import AIMessage, AIProvider, AIProviderRuntimeConfig
 from app.integrations.ai.deepseek.errors import (
     AIBudgetExceededError,
-    AICircuitOpenError,
     AIJSONValidationError,
     AIProviderError,
-    AIRateLimitedError,
     AITransientError,
 )
+from app.integrations.ai.limits import ai_limit_controller
 from app.integrations.ai.prompts import (
     DEFAULT_OUTPUT_SCHEMA_VERSION,
     DEFAULT_PROMPT_KEY,
@@ -136,7 +133,11 @@ class AIService:
         row = self.get_or_create_provider_config(provider)
         api_base = str(values.get("api_base") or row.api_base or DEEPSEEK_OFFICIAL_API_BASE)
         allow_custom = bool(ai_settings.ai_allow_custom_api_base)
-        row.api_base = validate_deepseek_api_base(api_base, allow_custom=allow_custom)
+        row.api_base = validate_deepseek_api_base(
+            api_base,
+            allow_custom=allow_custom,
+            allow_acceptance_mock=ai_settings.acceptance_mock_http_allowed,
+        )
         for field in _WRITABLE_CONFIG_FIELDS:
             if field not in values:
                 continue
@@ -216,54 +217,77 @@ class AIService:
         if existing is not None and not force:
             return existing
 
-        self._check_budget(row, auto=auto)
-        run = AIRun(
-            job_type=job_type,
-            provider=row.provider,
-            model=runtime.model,
-            event_count=1,
-            status="running",
+        dedupe_key = _input_hash_lock_key(
+            row.provider,
+            runtime.model,
+            event.id,
+            template.version,
+            input_hash,
         )
-        self.session.add(run)
-        self.session.flush()
-        try:
-            with _limit_controller.reserve(
-                row.provider,
-                max_concurrency=row.max_concurrency,
-                requests_per_minute=int((row.config or {}).get("requests_per_minute", 60)),
-            ):
-                provider = self.provider_registry.create(runtime, client=self.http_client)
-                output, prompt_tokens, completion_tokens, retries = await call_with_repair(
-                    provider,
-                    event_input,
-                    template,
-                )
-            insight = self._save_insight(
-                event,
-                runtime=runtime,
-                prompt_version=template.version,
-                input_hash=input_hash,
-                output=normalize_output_sources(output, event_input),
-                prompt_tokens=prompt_tokens,
-                completion_tokens=completion_tokens,
+        with _limit_controller.input_hash_lock(
+            dedupe_key,
+        ):
+            existing = self._find_existing(event.id, runtime, template.version, input_hash)
+            if existing is not None and not force:
+                return existing
+
+            usage = self._check_budget(row, auto=auto)
+            _limit_controller.sync_daily_usage(row.provider, usage)
+            run = AIRun(
+                job_type=job_type,
+                provider=row.provider,
+                model=runtime.model,
+                event_count=1,
+                status="running",
             )
-            run.status = "success"
-            run.prompt_tokens = prompt_tokens
-            run.completion_tokens = completion_tokens
-            run.retry_count = retries
-            run.finished_at = utc_now()
-            _limit_controller.record_success(row.provider)
+            self.session.add(run)
             self.session.flush()
-            return insight
-        except Exception as exc:
-            run.status = "budget_rejected" if isinstance(exc, AIBudgetExceededError) else "failed"
-            run.error_code = getattr(exc, "error_code", "ai_task_failed")
-            run.error_sanitized = sanitize_error(exc)
-            run.finished_at = utc_now()
-            if isinstance(exc, AITransientError):
-                _limit_controller.record_failure(row.provider)
-            self.session.flush()
-            raise
+            try:
+                with _limit_controller.reserve(
+                    row.provider,
+                    max_concurrency=row.max_concurrency,
+                    requests_per_minute=int((row.config or {}).get("requests_per_minute", 60)),
+                    daily_request_budget=row.daily_request_budget,
+                    daily_token_budget=row.daily_token_budget,
+                ):
+                    provider = self.provider_registry.create(runtime, client=self.http_client)
+                    output, prompt_tokens, completion_tokens, retries = await call_with_repair(
+                        provider,
+                        event_input,
+                        template,
+                    )
+                insight = self._save_insight(
+                    event,
+                    runtime=runtime,
+                    prompt_version=template.version,
+                    input_hash=input_hash,
+                    output=normalize_output_sources(output, event_input),
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                )
+                run.status = "success"
+                run.prompt_tokens = prompt_tokens
+                run.completion_tokens = completion_tokens
+                run.retry_count = retries
+                run.finished_at = utc_now()
+                _limit_controller.record_token_usage(
+                    row.provider,
+                    prompt_tokens + completion_tokens,
+                )
+                _limit_controller.record_success(row.provider)
+                self.session.flush()
+                return insight
+            except Exception as exc:
+                run.status = (
+                    "budget_rejected" if isinstance(exc, AIBudgetExceededError) else "failed"
+                )
+                run.error_code = getattr(exc, "error_code", "ai_task_failed")
+                run.error_sanitized = sanitize_error(exc)
+                run.finished_at = utc_now()
+                if isinstance(exc, AITransientError):
+                    _limit_controller.record_failure(row.provider)
+                self.session.flush()
+                raise
 
     async def summarize_event_batch(
         self,
@@ -388,7 +412,7 @@ class AIService:
         self.session.flush()
         return row
 
-    def _check_budget(self, row: AIProviderConfig, *, auto: bool) -> None:
+    def _check_budget(self, row: AIProviderConfig, *, auto: bool) -> AIUsageSnapshot:
         usage = self.usage_today(row.provider)
         if auto and row.daily_token_budget == 0:
             raise AIBudgetExceededError("AI auto processing token budget is zero")
@@ -396,6 +420,7 @@ class AIService:
             raise AIBudgetExceededError("AI daily token budget exceeded")
         if row.daily_request_budget > 0 and usage.requests_today >= row.daily_request_budget:
             raise AIBudgetExceededError("AI daily request budget exceeded")
+        return usage
 
     def _event_or_none(self, event_id: int) -> Event | None:
         return self.session.scalar(
@@ -618,57 +643,18 @@ def _severity_allowed(value: str, minimum: str) -> bool:
     return rank.get(value, 0) >= rank.get(minimum, 2)
 
 
+def _input_hash_lock_key(
+    provider: str,
+    model: str,
+    event_id: int,
+    prompt_version: str,
+    input_hash: str,
+) -> str:
+    return f"{provider}:{model}:{event_id}:{prompt_version}:{input_hash}"
+
+
 def _json_dumps(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-
-
-class _LimitController:
-    def __init__(self) -> None:
-        self._lock = threading.Lock()
-        self._active: dict[str, int] = {}
-        self._minute: dict[str, tuple[int, float]] = {}
-        self._failures: dict[str, int] = {}
-        self._circuit_until: dict[str, float] = {}
-
-    @contextmanager
-    def reserve(self, provider: str, *, max_concurrency: int, requests_per_minute: int):
-        self._acquire(provider, max_concurrency, requests_per_minute)
-        try:
-            yield
-        finally:
-            self._release(provider)
-
-    def _acquire(self, provider: str, max_concurrency: int, requests_per_minute: int) -> None:
-        now = time.monotonic()
-        with self._lock:
-            if self._circuit_until.get(provider, 0) > now:
-                raise AICircuitOpenError("AI provider circuit breaker is open")
-            if self._active.get(provider, 0) >= max_concurrency:
-                raise AIRateLimitedError(retry_after_seconds=1)
-            count, window_start = self._minute.get(provider, (0, now))
-            if now - window_start >= 60:
-                count = 0
-                window_start = now
-            if count >= requests_per_minute:
-                raise AIRateLimitedError(retry_after_seconds=max(1, 60 - int(now - window_start)))
-            self._active[provider] = self._active.get(provider, 0) + 1
-            self._minute[provider] = (count + 1, window_start)
-
-    def _release(self, provider: str) -> None:
-        with self._lock:
-            self._active[provider] = max(self._active.get(provider, 1) - 1, 0)
-
-    def record_success(self, provider: str) -> None:
-        with self._lock:
-            self._failures[provider] = 0
-            self._circuit_until.pop(provider, None)
-
-    def record_failure(self, provider: str) -> None:
-        with self._lock:
-            failures = self._failures.get(provider, 0) + 1
-            self._failures[provider] = failures
-            if failures >= 5:
-                self._circuit_until[provider] = time.monotonic() + 300
 
 
 _WRITABLE_CONFIG_FIELDS = {
@@ -685,7 +671,7 @@ _WRITABLE_CONFIG_FIELDS = {
     "auto_minimum_severity",
     "config",
 }
-_limit_controller = _LimitController()
+_limit_controller = ai_limit_controller
 
 
 def summarize_event_sync(

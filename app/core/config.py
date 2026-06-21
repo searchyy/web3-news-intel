@@ -89,6 +89,7 @@ class Settings(BaseSettings):
     admin_session_ttl_seconds: int = Field(default=28800, ge=300, le=604800)
     admin_secure_cookie: bool = False
     enable_acceptance_tasks: bool = False
+    acceptance_mock_http_enabled: bool = False
     celery_redis_visibility_timeout_seconds: int = Field(default=3600, ge=1, le=86400)
 
     @field_validator("feishu_allowed_chat_ids", mode="before")
@@ -114,12 +115,22 @@ class Settings(BaseSettings):
             if self.public_base_url.startswith("https://") and not self.admin_secure_cookie:
                 raise ValueError("ADMIN_SECURE_COOKIE must be true for HTTPS PUBLIC_BASE_URL")
         if self.feishu_api_base:
-            validate_public_http_url(
-                self.feishu_api_base,
-                allow_private_networks=False,
-                allow_localhost=False,
-                resolve_dns=False,
-            )
+            if self.acceptance_mock_http_allowed:
+                validate_public_http_url(
+                    self.feishu_api_base,
+                    allow_private_networks=False,
+                    allow_localhost=False,
+                    resolve_dns=False,
+                )
+            else:
+                validate_public_http_url(
+                    self.feishu_api_base,
+                    allow_private_networks=False,
+                    allow_localhost=False,
+                    resolve_dns=False,
+                )
+                if not self.feishu_api_base.startswith("https://"):
+                    raise ValueError("FEISHU_API_BASE must use HTTPS")
         if self.deepseek_api_base:
             validate_public_http_url(
                 self.deepseek_api_base,
@@ -154,6 +165,14 @@ class Settings(BaseSettings):
             if missing:
                 raise ValueError(f"missing production configuration: {', '.join(missing)}")
         return self
+
+    @property
+    def acceptance_mock_http_allowed(self) -> bool:
+        return (
+            self.acceptance_mock_http_enabled
+            and self.enable_acceptance_tasks
+            and self.app_env.lower() in {"test", "ci"}
+        )
 
 
 settings = Settings()

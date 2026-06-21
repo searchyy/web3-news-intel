@@ -20,6 +20,12 @@ class AISettings(BaseSettings):
     ai_auto_process_enabled: bool = Field(default=False, alias="AI_AUTO_PROCESS_ENABLED")
     ai_provider: str = Field(default="deepseek", alias="AI_PROVIDER")
     ai_allow_custom_api_base: bool = Field(default=False, alias="AI_ALLOW_CUSTOM_API_BASE")
+    app_env: str = Field(default="local", alias="APP_ENV")
+    enable_acceptance_tasks: bool = Field(default=False, alias="ENABLE_ACCEPTANCE_TASKS")
+    acceptance_mock_http_enabled: bool = Field(
+        default=False,
+        alias="ACCEPTANCE_MOCK_HTTP_ENABLED",
+    )
     deepseek_api_base: str = Field(default=DEEPSEEK_OFFICIAL_API_BASE, alias="DEEPSEEK_API_BASE")
     deepseek_request_timeout_seconds: int = Field(
         default=90,
@@ -52,12 +58,31 @@ class AISettings(BaseSettings):
         validate_deepseek_api_base(
             self.deepseek_api_base,
             allow_custom=self.ai_allow_custom_api_base,
+            allow_acceptance_mock=self.acceptance_mock_http_allowed,
         )
         return self
 
+    @property
+    def acceptance_mock_http_allowed(self) -> bool:
+        return (
+            self.acceptance_mock_http_enabled
+            and self.enable_acceptance_tasks
+            and self.app_env.lower() in {"test", "ci"}
+        )
 
-def validate_deepseek_api_base(value: str, *, allow_custom: bool) -> str:
+
+def validate_deepseek_api_base(
+    value: str, *, allow_custom: bool, allow_acceptance_mock: bool = False
+) -> str:
     base = value.rstrip("/")
+    if allow_acceptance_mock and base.startswith("http://mock-deepseek"):
+        validate_public_http_url(
+            base,
+            allow_private_networks=False,
+            allow_localhost=False,
+            resolve_dns=False,
+        )
+        return base
     if not allow_custom and base != DEEPSEEK_OFFICIAL_API_BASE:
         raise ValueError("DeepSeek API Base 默认固定为官方地址")
     if not base.startswith("https://"):

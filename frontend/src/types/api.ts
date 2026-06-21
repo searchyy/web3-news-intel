@@ -63,7 +63,7 @@ export type EventFacets = {
   languages?: FacetOption[];
 };
 export type SavedSearch = {
-  id: string;
+  id: string | number;
   name: string;
   filters: Record<string, unknown>;
   created_at?: string;
@@ -169,6 +169,77 @@ export type Destination = {
   last_success_at?: string;
   last_failure_at?: string;
   last_error_message?: string;
+};
+export type ReportType =
+  | "immediate"
+  | "digest_15m"
+  | "digest_30m"
+  | "hourly"
+  | "daily_morning"
+  | "daily_evening"
+  | "custom";
+export type ReportSchedule = {
+  id: number;
+  destination_id: string;
+  name: string;
+  enabled: boolean;
+  report_type: ReportType;
+  timezone: string;
+  interval_minutes?: number | null;
+  hour?: number | null;
+  minute?: number | null;
+  saved_search_id?: number | null;
+  source_groups: string[];
+  categories: string[];
+  severities: string[];
+  symbols: string[];
+  chains: string[];
+  minimum_trust_score?: number | null;
+  include_ai_summary: boolean;
+  maximum_events: number;
+  activated_at?: string | null;
+  last_window_start?: string | null;
+  last_window_end?: string | null;
+  last_run_at?: string | null;
+  next_run_at?: string | null;
+  last_result?: string | null;
+  last_error_sanitized?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+export type ReportEventPreview = {
+  id: number;
+  title: string;
+  severity: string;
+  category: string;
+  published_at?: string | null;
+  first_seen_at: string;
+  primary_url?: string | null;
+  symbols: string[];
+  chains: string[];
+  ai_summary_zh?: string | null;
+};
+export type ReportPreview = {
+  schedule_id: number;
+  destination_id: string;
+  report_type: string;
+  window_start: string;
+  window_end: string;
+  event_count: number;
+  critical_high_count: number;
+  top_symbols: string[];
+  top_categories: string[];
+  summary_zh: string;
+  omitted_count: number;
+  card: Record<string, unknown>;
+  events: ReportEventPreview[];
+};
+export type ReportSendResult = {
+  schedule_id: number;
+  delivery_id?: number | null;
+  status: string;
+  dry_run: boolean;
+  message?: string | null;
 };
 export type Rule = {
   id: string;
