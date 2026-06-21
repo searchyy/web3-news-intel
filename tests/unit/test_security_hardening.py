@@ -134,6 +134,20 @@ def test_deepseek_mock_http_requires_acceptance_flag() -> None:
     )
 
 
+def test_settings_allow_deepseek_mock_http_only_in_acceptance_mode(monkeypatch) -> None:
+    monkeypatch.setenv("APP_ENV", "ci")
+    monkeypatch.setenv("ENABLE_ACCEPTANCE_TASKS", "true")
+    monkeypatch.setenv("ACCEPTANCE_MOCK_HTTP_ENABLED", "true")
+    monkeypatch.setenv("AI_ALLOW_CUSTOM_API_BASE", "true")
+    monkeypatch.setenv("DEEPSEEK_API_BASE", "http://mock-deepseek:9001")
+    settings = Settings(_env_file=None)
+    assert settings.deepseek_api_base == "http://mock-deepseek:9001"
+
+    monkeypatch.setenv("ACCEPTANCE_MOCK_HTTP_ENABLED", "false")
+    with pytest.raises(ValueError):
+        Settings(_env_file=None)
+
+
 def test_feishu_mock_http_requires_acceptance_mode(monkeypatch) -> None:
     monkeypatch.setattr(settings, "app_env", "local")
     monkeypatch.setattr(settings, "enable_acceptance_tasks", False)

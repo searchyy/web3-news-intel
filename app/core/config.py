@@ -132,19 +132,29 @@ class Settings(BaseSettings):
                 if not self.feishu_api_base.startswith("https://"):
                     raise ValueError("FEISHU_API_BASE must use HTTPS")
         if self.deepseek_api_base:
-            validate_public_http_url(
-                self.deepseek_api_base,
-                allow_private_networks=False,
-                allow_localhost=False,
-                resolve_dns=self.deepseek_allow_custom_api_base,
-            )
-            if (
-                self.deepseek_api_base.rstrip("/") != "https://api.deepseek.com"
-                and not self.deepseek_allow_custom_api_base
+            if self.acceptance_mock_http_allowed and self.deepseek_api_base.startswith(
+                "http://mock-deepseek"
             ):
-                raise ValueError(
-                    "DEEPSEEK_ALLOW_CUSTOM_API_BASE must be true for non-official API base"
+                validate_public_http_url(
+                    self.deepseek_api_base,
+                    allow_private_networks=False,
+                    allow_localhost=False,
+                    resolve_dns=False,
                 )
+            else:
+                validate_public_http_url(
+                    self.deepseek_api_base,
+                    allow_private_networks=False,
+                    allow_localhost=False,
+                    resolve_dns=self.deepseek_allow_custom_api_base,
+                )
+                if (
+                    self.deepseek_api_base.rstrip("/") != "https://api.deepseek.com"
+                    and not self.deepseek_allow_custom_api_base
+                ):
+                    raise ValueError(
+                        "DEEPSEEK_ALLOW_CUSTOM_API_BASE must be true for non-official API base"
+                    )
         if self.app_env.lower() == "production":
             if not self.admin_secure_cookie:
                 raise ValueError("ADMIN_SECURE_COOKIE must be true in production")
