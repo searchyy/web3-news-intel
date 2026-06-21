@@ -1,0 +1,48 @@
+name: Source Adapter Contracts
+
+permissions:
+  contents: read
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  source-adapter-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: mkdir -p artifacts
+      - run: python -m pip install --upgrade pip
+        timeout-minutes: 2
+      - run: python -m pip install -e ".[dev]"
+        timeout-minutes: 5
+      - name: Validate source catalog contracts
+        run: >
+          python scripts/validate_sources.py sources.yaml
+          --strict-contract
+          --catalog-dir source_catalog
+          --json-out artifacts/source-contracts.json
+        timeout-minutes: 2
+      - name: Run adapter/parser fixture contracts
+        run: >
+          python -m pytest
+          tests/unit/test_exchange_parsers.py
+          tests/unit/test_media_parsers.py
+          tests/unit/test_media_catalog.py
+          tests/integration/test_parser_resilience.py
+          -q
+          --junitxml=artifacts/source-adapter-contracts.xml
+        timeout-minutes: 6
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: source-adapter-contracts-artifacts
+          path: artifacts

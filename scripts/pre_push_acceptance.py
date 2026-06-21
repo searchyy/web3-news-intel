@@ -16,6 +16,21 @@ REQUIRED_CI_JOBS = {
     "compose-acceptance",
 }
 EXPECTED_OPTIONAL_CI_JOBS = {"frontend-quality"}
+REQUIRED_WORKFLOW_FILES = {
+    "ci.yml",
+    "source-adapter-contracts.yml",
+    "ai-integration-mock.yml",
+    "frontend-performance.yml",
+    "live-source-canary.yml",
+    "deepseek-test.yml",
+}
+REQUIRED_WORKFLOW_JOBS = {
+    "source-adapter-contracts.yml": {"source-adapter-contracts"},
+    "ai-integration-mock.yml": {"ai-integration-mock"},
+    "frontend-performance.yml": {"frontend-performance"},
+    "live-source-canary.yml": {"live-source-canary"},
+    "deepseek-test.yml": {"deepseek-live-test"},
+}
 SENSITIVE_NAME_RE = re.compile(r"(token|secret|password|api[_-]?key|private[_-]?key)", re.I)
 SENSITIVE_ASSIGNMENT_RE = re.compile(
     r"(?i)(token|secret|password|api[_-]?key|private[_-]?key)=([^\s]+)"
@@ -55,6 +70,18 @@ COMMANDS: tuple[tuple[str, list[str]], ...] = (
         "sources",
         [sys.executable, "scripts/validate_sources.py", "sources.yaml"],
     ),
+    (
+        "source-contracts",
+        [
+            sys.executable,
+            "scripts/validate_sources.py",
+            "sources.yaml",
+            "--strict-contract",
+            "--catalog-dir",
+            "source_catalog",
+        ],
+    ),
+    ("security-acceptance", [sys.executable, "scripts/security_acceptance.py"]),
 )
 
 
@@ -104,6 +131,28 @@ def validate_workflows(repo_root: Path) -> None:
             "ci.yml is missing expected jobs "
             f"{sorted(missing_optional)}; found {sorted(actual)}"
         )
+    workflow_dir = repo_root / ".github" / "workflows"
+    present = {item.name for item in workflow_dir.glob("*.yml")}
+    missing_files = REQUIRED_WORKFLOW_FILES - present
+    if missing_files:
+        raise AcceptanceError(f"missing required workflow files {sorted(missing_files)}")
+    for filename, expected_jobs in REQUIRED_WORKFLOW_JOBS.items():
+        workflow_path = workflow_dir / filename
+        workflow = _load_github_actions_yaml(workflow_path)
+        jobs = workflow.get("jobs")
+        if not isinstance(jobs, dict):
+            raise AcceptanceError(f"{filename} is missing jobs mapping")
+        missing_jobs = expected_jobs - set(jobs)
+        if missing_jobs:
+            raise AcceptanceError(
+                f"{filename} is missing required jobs {sorted(missing_jobs)}; "
+                f"found {sorted(jobs)}"
+            )
+        triggers = _workflow_triggers(workflow)
+        if filename == "live-source-canary.yml" and "pull_request" in triggers:
+            raise AcceptanceError("live-source-canary.yml must not run on pull_request")
+        if filename == "deepseek-test.yml" and triggers != {"workflow_dispatch"}:
+            raise AcceptanceError("deepseek-test.yml must be workflow_dispatch only")
 
 
 def _load_github_actions_yaml(path: Path) -> dict:
@@ -127,6 +176,17 @@ def _github_actions_yaml_loader() -> type[yaml.SafeLoader]:
             if tag != "tag:yaml.org,2002:bool"
         ]
     return Loader
+
+
+def _workflow_triggers(data: dict) -> set[str]:
+    triggers = data.get("on")
+    if isinstance(triggers, str):
+        return {triggers}
+    if isinstance(triggers, list):
+        return {str(item) for item in triggers}
+    if isinstance(triggers, dict):
+        return {str(key) for key in triggers}
+    return set()
 
 
 def _run_command(label: str, command: list[str], *, cwd: Path) -> CommandResult:

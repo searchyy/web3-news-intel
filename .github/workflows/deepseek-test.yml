@@ -1,0 +1,77 @@
+name: DeepSeek Live Test
+
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: "DeepSeek model to test"
+        required: true
+        default: "deepseek-chat"
+
+jobs:
+  deepseek-live-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: deepseek-live
+    env:
+      DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+      DEEPSEEK_MODEL: ${{ inputs.model }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: mkdir -p artifacts
+      - run: python -m pip install httpx
+        timeout-minutes: 1
+      - name: Run one sanitized DeepSeek chat completion
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          import sys
+
+          import httpx
+
+          api_key = os.environ.get("DEEPSEEK_API_KEY")
+          model = os.environ.get("DEEPSEEK_MODEL") or "deepseek-chat"
+          if not api_key:
+              print("DEEPSEEK_API_KEY is not configured", file=sys.stderr)
+              raise SystemExit(1)
+          payload = {
+              "model": model,
+              "messages": [
+                  {"role": "system", "content": "Return compact JSON only."},
+                  {"role": "user", "content": "Return {\"status\":\"ok\"}."},
+              ],
+              "temperature": 0,
+              "max_tokens": 16,
+          }
+          response = httpx.post(
+              "https://api.deepseek.com/chat/completions",
+              headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+              json=payload,
+              timeout=30,
+          )
+          body = response.content
+          result = {
+              "status_code": response.status_code,
+              "model": model,
+              "response_sha256": hashlib.sha256(body).hexdigest(),
+              "response_bytes": len(body),
+          }
+          print(json.dumps(result, ensure_ascii=False, indent=2))
+          with open("artifacts/deepseek-live-test.json", "w", encoding="utf-8") as handle:
+              json.dump(result, handle, ensure_ascii=False, indent=2)
+          response.raise_for_status()
+          PY
+        timeout-minutes: 1
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: deepseek-live-test-artifacts
+          path: artifacts
