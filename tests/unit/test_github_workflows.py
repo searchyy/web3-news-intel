@@ -56,6 +56,10 @@ def test_postgres_integration_has_postgres_service_and_healthcheck() -> None:
     postgres = job["services"]["postgres"]
     assert "postgres" in postgres["image"]
     assert "pg_isready" in postgres["options"]
+    assert job["env"]["ACCEPTANCE_ARTIFACT_DIR"] == "artifacts"
+    commands = "\n".join(_job_run_commands(job))
+    assert "artifacts/search-performance.json" in commands
+    assert "artifacts/search-performance.md" in commands
 
 
 def test_redis_celery_integration_has_redis_service_and_healthcheck() -> None:

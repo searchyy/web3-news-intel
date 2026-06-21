@@ -48,12 +48,42 @@ def test_constraints_indexes_foreign_keys_and_migration_version(postgres_session
     bind = postgres_session.get_bind()
     inspector = inspect(bind)
     version = postgres_session.execute(text("select version_num from alembic_version")).scalar_one()
-    assert version == "0001_initial"
+    assert version == "0006_source_catalog_metadata"
+
+    extensions = {
+        row[0]
+        for row in postgres_session.execute(
+            text("select extname from pg_extension where extname = 'pg_trgm'")
+        )
+    }
+    assert "pg_trgm" in extensions
 
     event_indexes = {index["name"] for index in inspector.get_indexes("events")}
     assert "ix_events_event_key" in event_indexes
     assert "ix_events_published_at" in event_indexes
     assert "ix_events_category" in event_indexes
+    assert "ix_events_first_seen_at" in event_indexes
+    assert "ix_events_status_severity_first_seen" in event_indexes
+    assert "ix_events_category_first_seen" in event_indexes
+
+    postgres_indexes = {
+        row[0]
+        for row in postgres_session.execute(
+            text(
+                """
+                select indexname
+                from pg_indexes
+                where schemaname = current_schema()
+                  and tablename = 'events'
+                """
+            )
+        )
+    }
+    assert "ix_events_title_trgm" in postgres_indexes
+    assert "ix_events_summary_trgm" in postgres_indexes
+    assert "ix_events_symbols_gin" in postgres_indexes
+    assert "ix_events_chains_gin" in postgres_indexes
+    assert "ix_events_entities_gin" in postgres_indexes
 
     event_source_fks = {
         tuple(foreign_key["constrained_columns"])

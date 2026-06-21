@@ -87,6 +87,7 @@ jobs:
     env:
       DATABASE_URL: postgresql+psycopg://web3_news:web3_news@localhost:5432/web3_news_intel
       TEST_DATABASE_URL: postgresql+psycopg://web3_news:web3_news@localhost:5432/web3_news_intel
+      ACCEPTANCE_ARTIFACT_DIR: artifacts
       PYTEST_FAIL_ON_SKIP: "1"
     steps:
       - uses: actions/checkout@v4
@@ -130,7 +131,9 @@ jobs:
       - run: >
           python -m pytest tests/integration -q -m postgres
           --junitxml=artifacts/postgres-1.xml
-        timeout-minutes: 6
+        timeout-minutes: 10
+      - run: test -s artifacts/search-performance.json && test -s artifacts/search-performance.md
+        timeout-minutes: 1
       - run: set -o pipefail && alembic downgrade -1 2>&1 | tee artifacts/alembic-downgrade.log
         timeout-minutes: 2
       - run: set -o pipefail && alembic upgrade head 2>&1 | tee artifacts/alembic-upgrade-2.log
@@ -140,7 +143,9 @@ jobs:
       - run: >
           python -m pytest tests/integration -q -m postgres
           --junitxml=artifacts/postgres-2.xml
-        timeout-minutes: 6
+        timeout-minutes: 10
+      - run: test -s artifacts/search-performance.json && test -s artifacts/search-performance.md
+        timeout-minutes: 1
       - if: always()
         uses: actions/upload-artifact@v4
         with:

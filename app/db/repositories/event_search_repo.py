@@ -300,6 +300,31 @@ class EventSearchRepository:
         return [FacetBucket(key=str(key), count=int(count)) for key, count in rows if key]
 
     def _array_buckets(self, filtered, column_value) -> list[FacetBucket]:
+        if self.dialect == "postgresql":
+            expanded = (
+                select(
+                    Event.id.label("event_id"),
+                    func.unnest(column_value).label("facet_value"),
+                )
+                .select_from(Event)
+                .join(filtered, filtered.c.id == Event.id)
+                .subquery()
+            )
+            rows = self.session.execute(
+                select(expanded.c.facet_value, func.count(func.distinct(expanded.c.event_id)))
+                .where(
+                    expanded.c.facet_value.is_not(None),
+                    expanded.c.facet_value != "",
+                )
+                .group_by(expanded.c.facet_value)
+                .order_by(
+                    func.count(func.distinct(expanded.c.event_id)).desc(),
+                    expanded.c.facet_value.asc(),
+                )
+                .limit(100)
+            )
+            return [FacetBucket(key=str(key), count=int(count)) for key, count in rows if key]
+
         rows = self.session.execute(
             select(column_value).select_from(Event).join(filtered, filtered.c.id == Event.id)
         )
