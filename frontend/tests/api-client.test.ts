@@ -17,4 +17,18 @@ describe("api client", () => {
 
     vi.restoreAllMocks();
   });
+
+  it("can suppress login redirects for background session checks", async () => {
+    window.history.pushState({}, "", "/");
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("not authenticated", { status: 401 }));
+
+    await expect(api("/api/admin/auth/me", { authRedirect: false })).rejects.toThrow("HTTP 401");
+    expect(window.location.pathname).toBe("/");
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      "/api/admin/auth/me",
+      expect.not.objectContaining({ authRedirect: false })
+    );
+
+    vi.restoreAllMocks();
+  });
 });

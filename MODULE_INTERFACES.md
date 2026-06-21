@@ -52,9 +52,9 @@ Required behavior:
 - max response size
 - per-host rate limit
 - robots check for HTML pages
-- Retry-After support
+- publisher backoff header support
 - exponential backoff for transient errors
-- stop on 401/403
+- terminal access response handling
 - structured logs
 
 ## Dedupe

@@ -30,11 +30,22 @@ celery_app.conf.update(
         "poll-sources-every-minute": {
             "task": "app.workers.tasks_fetch.poll_sources",
             "schedule": 60.0,
-        }
+        },
+        "run-feishu-reports-every-minute": {
+            "task": "app.workers.tasks_feishu_reports.run_due_feishu_reports",
+            "schedule": 60.0,
+        },
     },
 )
 
 import app.workers.tasks_acceptance  # noqa: E402,F401
+
+try:
+    import app.workers.tasks_ai  # noqa: E402,F401
+except (ImportError, ModuleNotFoundError):
+    if getattr(settings, "ai_enabled", False):
+        raise
+import app.workers.tasks_feishu_reports  # noqa: E402,F401
 import app.workers.tasks_fetch  # noqa: E402,F401
 import app.workers.tasks_parse  # noqa: E402,F401
 import app.workers.tasks_publish  # noqa: E402,F401

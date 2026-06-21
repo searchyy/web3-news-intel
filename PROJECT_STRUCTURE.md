@@ -55,7 +55,6 @@ web3-news-intel/
       robots.py
       retry.py
       user_agent.py
-      browser.py                     # optional Playwright fallback, disabled by default
 
     adapters/
       base.py

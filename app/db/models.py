@@ -33,21 +33,44 @@ class Source(Base):
     id: Mapped[int] = mapped_column(BigIntPk, primary_key=True, autoincrement=True)
     key: Mapped[str] = mapped_column(Text, unique=True, nullable=False, index=True)
     name: Mapped[str] = mapped_column(Text, nullable=False)
+    display_name_zh: Mapped[str | None] = mapped_column(Text)
+    source_group: Mapped[str] = mapped_column(Text, nullable=False, default="legacy", index=True)
     source_type: Mapped[str] = mapped_column(Text, nullable=False, index=True)
     adapter: Mapped[str] = mapped_column(Text, nullable=False)
     url: Mapped[str] = mapped_column(Text, nullable=False)
     canonical_url: Mapped[str] = mapped_column(Text, nullable=False)
     category: Mapped[str] = mapped_column(Text, nullable=False, index=True)
     language: Mapped[str | None] = mapped_column(Text)
+    official: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)
     trust_score: Mapped[int] = mapped_column(Integer, nullable=False, default=50)
     poll_seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=300)
     timeout_seconds: Mapped[float] = mapped_column(Float, nullable=False, default=15.0)
     max_response_bytes: Mapped[int] = mapped_column(
         Integer, nullable=False, default=2 * 1024 * 1024
     )
+    max_items_per_fetch: Mapped[int] = mapped_column(Integer, nullable=False, default=50)
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     allow_private_networks: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     allow_localhost: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    ranking_provider: Mapped[str | None] = mapped_column(Text)
+    ranking_position: Mapped[int | None] = mapped_column(Integer)
+    ranking_snapshot_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    parser_version: Mapped[str] = mapped_column(Text, nullable=False, default="v1")
+    supported_categories: Mapped[list[str]] = mapped_column(TextArray, nullable=False, default=list)
+    health_status: Mapped[str] = mapped_column(Text, nullable=False, default="unknown", index=True)
+    live_canary_status: Mapped[str] = mapped_column(Text, nullable=False, default="unknown")
+    last_canary_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_canary_error: Mapped[str | None] = mapped_column(Text)
+    last_fetch_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_success_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_parsed_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_http_status: Mapped[int | None] = mapped_column(Integer)
+    last_error: Mapped[str | None] = mapped_column(Text)
+    etag: Mapped[str | None] = mapped_column(Text)
+    last_modified: Mapped[str | None] = mapped_column(Text)
+    cursor: Mapped[str | None] = mapped_column(Text)
+    consecutive_failures: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    circuit_open_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     config: Mapped[dict[str, Any]] = mapped_column(JsonDocument, nullable=False, default=dict)
     access_denied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     access_denied_reason: Mapped[str | None] = mapped_column(Text)
@@ -142,6 +165,156 @@ class Event(Base):
         back_populates="event", cascade="all, delete-orphan"
     )
     deliveries: Mapped[list[Delivery]] = relationship(back_populates="event")
+    ai_insights: Mapped[list[EventAIInsight]] = relationship(
+        back_populates="event", cascade="all, delete-orphan"
+    )
+
+
+class SavedSearch(Base):
+    __tablename__ = "saved_searches"
+    __table_args__ = (
+        UniqueConstraint("owner_subject", "name", name="uq_saved_searches_owner_name"),
+    )
+
+    id: Mapped[int] = mapped_column(BigIntPk, primary_key=True, autoincrement=True)
+    owner_subject: Mapped[str] = mapped_column(Text, nullable=False, default="admin", index=True)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    filters: Mapped[dict[str, Any]] = mapped_column(JsonDocument, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class AIProviderConfig(Base):
+    __tablename__ = "ai_provider_configs"
+
+    id: Mapped[int] = mapped_column(BigIntPk, primary_key=True, autoincrement=True)
+    provider: Mapped[str] = mapped_column(Text, nullable=False, unique=True, index=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    api_base: Mapped[str] = mapped_column(Text, nullable=False)
+    api_key_ciphertext: Mapped[str | None] = mapped_column(Text)
+    api_key_fingerprint: Mapped[str | None] = mapped_column(Text)
+    model: Mapped[str | None] = mapped_column(Text)
+    timeout_seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=90)
+    max_concurrency: Mapped[int] = mapped_column(Integer, nullable=False, default=2)
+    max_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=1200)
+    temperature: Mapped[float] = mapped_column(Float, nullable=False, default=0.2)
+    thinking_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    daily_token_budget: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    daily_request_budget: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    auto_process_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    auto_minimum_severity: Mapped[str] = mapped_column(Text, nullable=False, default="high")
+    config: Mapped[dict[str, Any]] = mapped_column(JsonDocument, nullable=False, default=dict)
+    last_tested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_test_status: Mapped[str | None] = mapped_column(Text)
+    last_error_sanitized: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class AIPromptTemplate(Base):
+    __tablename__ = "ai_prompt_templates"
+    __table_args__ = (
+        UniqueConstraint("key", "version", name="uq_ai_prompt_templates_key_version"),
+    )
+
+    id: Mapped[int] = mapped_column(BigIntPk, primary_key=True, autoincrement=True)
+    key: Mapped[str] = mapped_column(Text, nullable=False, index=True)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    system_prompt: Mapped[str] = mapped_column(Text, nullable=False)
+    user_prompt_template: Mapped[str] = mapped_column(Text, nullable=False)
+    output_schema_version: Mapped[str] = mapped_column(Text, nullable=False, default="v1")
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    version: Mapped[str] = mapped_column(Text, nullable=False, default="v1")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class EventAIInsight(Base):
+    __tablename__ = "event_ai_insights"
+    __table_args__ = (
+        UniqueConstraint(
+            "event_id",
+            "provider",
+            "model",
+            "prompt_version",
+            "input_hash",
+            name="uq_event_ai_insights_input",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigIntPk, primary_key=True, autoincrement=True)
+    event_id: Mapped[int] = mapped_column(ForeignKey("events.id"), nullable=False, index=True)
+    provider: Mapped[str] = mapped_column(Text, nullable=False, index=True)
+    model: Mapped[str] = mapped_column(Text, nullable=False)
+    prompt_version: Mapped[str] = mapped_column(Text, nullable=False)
+    input_hash: Mapped[str] = mapped_column(Text, nullable=False, index=True)
+    summary_zh: Mapped[str | None] = mapped_column(Text)
+    headline_zh: Mapped[str | None] = mapped_column(Text)
+    key_facts: Mapped[list[dict[str, Any]]] = mapped_column(
+        JsonDocument, nullable=False, default=list
+    )
+    entities: Mapped[list[dict[str, Any]]] = mapped_column(
+        JsonDocument, nullable=False, default=list
+    )
+    symbols: Mapped[list[str]] = mapped_column(TextArray, nullable=False, default=list)
+    chains: Mapped[list[str]] = mapped_column(TextArray, nullable=False, default=list)
+    event_type: Mapped[str | None] = mapped_column(Text)
+    importance_score: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    risk_level: Mapped[str] = mapped_column(Text, nullable=False, default="low")
+    sentiment: Mapped[str] = mapped_column(Text, nullable=False, default="neutral")
+    market_impact: Mapped[str | None] = mapped_column(Text)
+    facts: Mapped[list[dict[str, Any]]] = mapped_column(JsonDocument, nullable=False, default=list)
+    inferences: Mapped[list[dict[str, Any]]] = mapped_column(
+        JsonDocument, nullable=False, default=list
+    )
+    confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    source_event_ids: Mapped[list[str]] = mapped_column(TextArray, nullable=False, default=list)
+    source_urls: Mapped[list[str]] = mapped_column(TextArray, nullable=False, default=list)
+    prompt_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    completion_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    generated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(Text, nullable=False, default="pending", index=True)
+    error_sanitized: Mapped[str | None] = mapped_column(Text)
+
+    event: Mapped[Event] = relationship(back_populates="ai_insights")
+
+
+EventAiInsight = EventAIInsight
+
+
+class AIRun(Base):
+    __tablename__ = "ai_runs"
+
+    id: Mapped[int] = mapped_column(BigIntPk, primary_key=True, autoincrement=True)
+    job_type: Mapped[str] = mapped_column(Text, nullable=False, index=True)
+    provider: Mapped[str] = mapped_column(Text, nullable=False, index=True)
+    model: Mapped[str | None] = mapped_column(Text)
+    event_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    prompt_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    completion_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    estimated_cost: Mapped[float | None] = mapped_column(Float)
+    latency_ms: Mapped[int | None] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(Text, nullable=False, index=True)
+    retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    error_code: Mapped[str | None] = mapped_column(Text)
+    error_sanitized: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), index=True
+    )
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class NotificationDestination(Base):
@@ -175,6 +348,9 @@ class NotificationDestination(Base):
     )
 
     rules: Mapped[list[NotificationRule]] = relationship(
+        back_populates="destination", cascade="all, delete-orphan"
+    )
+    report_schedules: Mapped[list[ReportSchedule]] = relationship(
         back_populates="destination", cascade="all, delete-orphan"
     )
     deliveries: Mapped[list[Delivery]] = relationship(back_populates="destination")
@@ -211,6 +387,49 @@ class NotificationRule(Base):
     )
 
     destination: Mapped[NotificationDestination] = relationship(back_populates="rules")
+
+
+class ReportSchedule(Base):
+    __tablename__ = "report_schedules"
+
+    id: Mapped[int] = mapped_column(BigIntPk, primary_key=True, autoincrement=True)
+    destination_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("notification_destinations.id"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
+    report_type: Mapped[str] = mapped_column(Text, nullable=False, index=True)
+    timezone: Mapped[str] = mapped_column(Text, nullable=False, default="UTC")
+    interval_minutes: Mapped[int | None] = mapped_column(Integer)
+    hour: Mapped[int | None] = mapped_column(Integer)
+    minute: Mapped[int | None] = mapped_column(Integer)
+    saved_search_id: Mapped[int | None] = mapped_column(ForeignKey("saved_searches.id"), index=True)
+    source_groups: Mapped[list[str]] = mapped_column(TextArray, nullable=False, default=list)
+    categories: Mapped[list[str]] = mapped_column(TextArray, nullable=False, default=list)
+    severities: Mapped[list[str]] = mapped_column(TextArray, nullable=False, default=list)
+    symbols: Mapped[list[str]] = mapped_column(TextArray, nullable=False, default=list)
+    chains: Mapped[list[str]] = mapped_column(TextArray, nullable=False, default=list)
+    minimum_trust_score: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    include_ai_summary: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    maximum_events: Mapped[int] = mapped_column(Integer, nullable=False, default=10)
+    activated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_window_start: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_window_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    next_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    last_result: Mapped[str | None] = mapped_column(Text)
+    last_error_sanitized: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+    destination: Mapped[NotificationDestination] = relationship(
+        back_populates="report_schedules"
+    )
+    saved_search: Mapped[SavedSearch | None] = relationship()
 
 
 class FeishuCallbackReceipt(Base):

@@ -138,6 +138,8 @@ def _validate_runtime_sources(
             summary["warnings"].append(f"{key}: 尚未迁移到统一 source_group")
         if source.config.get("browser") or source.config.get("stealth"):
             summary["issues"].append(f"{key}: source config 禁止 browser/stealth 抓取模式")
+        if source.config.get("trust_env"):
+            summary["issues"].append(f"{key}: source config 禁止 trust_env/proxy 出口")
 
 
 def _validate_catalog_dir(catalog_dir: Path, summary: dict[str, Any]) -> None:
@@ -217,6 +219,8 @@ def _validate_catalog_source(
     config = raw.get("config")
     if isinstance(config, dict) and (config.get("browser") or config.get("stealth")):
         summary["issues"].append(f"{path}:{key}: catalog 禁止 browser/stealth 抓取模式")
+    if isinstance(config, dict) and config.get("trust_env"):
+        summary["issues"].append(f"{path}:{key}: catalog 禁止 trust_env/proxy 出口")
 
 
 def _validate_number(

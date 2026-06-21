@@ -15,7 +15,8 @@ policy:
     - login_cookie
     - private_header
     - paywalled_content
-  confirmation_rule: 媒体报道默认不是官方确认；重大事件需要多来源聚类或官方源确认。
+  confirmation_rule: "媒体报道默认不是官方确认；重大事件需要多来源聚类或官方来源确认。"
+
 sources:
   blockbeats_newsflash:
     key: blockbeats_newsflash
@@ -50,7 +51,14 @@ sources:
     live_canary_status: NOT_EXECUTED
     last_canary_at:
     last_canary_error:
-    known_limitations: 使用公开快讯列表页，只解析标题、摘要、时间、标签和链接。
+    known_limitations: "使用公开快讯列表页，仅解析标题、摘要、时间、标签和链接。"
+    config:
+      item_selector: "a[href^='/flash/']"
+      parser_version: blockbeats_newsflash_html_v1
+      source_group: media_zh
+      official: false
+      max_items: 20
+
   foresight_news:
     key: foresight_news
     name: Foresight News
@@ -74,8 +82,13 @@ sources:
     supported_categories: [newsflash, deep_article, market, funding, policy_regulatory, hack_security, project_update, token_unlock, onchain, exchange_repost]
     live_canary_status: DISABLED
     last_canary_at:
-    last_canary_error: 公开 RSS 或结构化接口待 live canary 验证，默认禁用。
-    known_limitations: 未验证公开入口前不宣称可用。
+    last_canary_error: "公开 RSS 或结构化入口待 live canary 验证，默认禁用。"
+    known_limitations: "未验证公开入口前不宣称可用。"
+    config:
+      parser_version: generic_media_html_v1
+      source_group: media_zh
+      official: false
+
   panews_news:
     key: panews_news
     name: PANews
@@ -99,8 +112,13 @@ sources:
     supported_categories: [newsflash, deep_article, market, funding, policy_regulatory, hack_security, project_update, token_unlock, onchain, exchange_repost]
     live_canary_status: DISABLED
     last_canary_at:
-    last_canary_error: 公开结构化接口待 live canary 验证，默认禁用。
-    known_limitations: 只允许采集公开列表字段；不保存文章全文。
+    last_canary_error: "公开结构化接口待 live canary 验证，默认禁用。"
+    known_limitations: "只允许采集公开列表字段，不保存文章全文。"
+    config:
+      parser_version: generic_media_json_api_v1
+      source_group: media_zh
+      official: false
+
   odaily_newsflash:
     key: odaily_newsflash
     name: Odaily
@@ -124,8 +142,13 @@ sources:
     supported_categories: [newsflash, deep_article, market, funding, policy_regulatory, hack_security, project_update, token_unlock, onchain, exchange_repost]
     live_canary_status: DISABLED
     last_canary_at:
-    last_canary_error: 公开快讯接口待 live canary 验证，默认禁用。
-    known_limitations: 未验证 robots 和页面结构前不启用。
+    last_canary_error: "公开快讯入口待 live canary 验证，默认禁用。"
+    known_limitations: "未验证 robots 和页面结构前不启用。"
+    config:
+      parser_version: generic_media_html_v1
+      source_group: media_zh
+      official: false
+
   chaincatcher_news:
     key: chaincatcher_news
     name: ChainCatcher
@@ -149,8 +172,13 @@ sources:
     supported_categories: [newsflash, deep_article, market, funding, policy_regulatory, hack_security, project_update, token_unlock, onchain, exchange_repost]
     live_canary_status: DISABLED
     last_canary_at:
-    last_canary_error: 公开结构化入口待 live canary 验证，默认禁用。
-    known_limitations: HTML 解析需先验证 robots 和 selector 稳定性。
+    last_canary_error: "公开结构化入口待 live canary 验证，默认禁用。"
+    known_limitations: "HTML 解析需先验证 robots 和 selector 稳定性。"
+    config:
+      parser_version: generic_media_html_v1
+      source_group: media_zh
+      official: false
+
   techflow_news:
     key: techflow_news
     name: TechFlow
@@ -174,8 +202,13 @@ sources:
     supported_categories: [newsflash, deep_article, market, funding, policy_regulatory, hack_security, project_update, token_unlock, onchain, exchange_repost]
     live_canary_status: DISABLED
     last_canary_at:
-    last_canary_error: 公开入口待 live canary 验证，默认禁用。
-    known_limitations: 未验证公开列表结构前不启用。
+    last_canary_error: "公开入口待 live canary 验证，默认禁用。"
+    known_limitations: "未验证公开列表结构前不启用。"
+    config:
+      parser_version: generic_media_html_v1
+      source_group: media_zh
+      official: false
+
   jinse_news:
     key: jinse_news
     name: Jinse Finance
@@ -199,8 +232,13 @@ sources:
     supported_categories: [newsflash, deep_article, market, funding, policy_regulatory, hack_security, project_update, token_unlock, onchain, exchange_repost]
     live_canary_status: DISABLED
     last_canary_at:
-    last_canary_error: 公开结构化入口待 live canary 验证，默认禁用。
-    known_limitations: 只允许列表摘要字段，不保存正文。
+    last_canary_error: "公开结构化入口待 live canary 验证，默认禁用。"
+    known_limitations: "只允许列表摘要字段，不保存正文。"
+    config:
+      parser_version: generic_media_html_v1
+      source_group: media_zh
+      official: false
+
   coindesk_rss:
     key: coindesk_rss
     name: CoinDesk RSS
@@ -225,7 +263,12 @@ sources:
     live_canary_status: NOT_EXECUTED
     last_canary_at:
     last_canary_error:
-    known_limitations: RSS 可能含 content 字段；解析器显式丢弃全文，仅保存摘要。
+    known_limitations: "RSS 可能含 content 字段；解析器显式丢弃全文，仅保存摘要。"
+    config:
+      parser_version: media_rss_v1
+      source_group: media_en
+      official: false
+
   theblock_rss:
     key: theblock_rss
     name: The Block
@@ -249,8 +292,13 @@ sources:
     supported_categories: [deep_article, market, funding, policy_regulatory, hack_security, project_update, token_unlock, onchain, exchange_repost]
     live_canary_status: DISABLED
     last_canary_at:
-    last_canary_error: 公开 RSS 或结构化接口待 live canary 验证，默认禁用。
-    known_limitations: 不绕过付费墙或登录墙。
+    last_canary_error: "公开 RSS 或结构化接口待 live canary 验证，默认禁用。"
+    known_limitations: "不绕过付费墙或登录墙。"
+    config:
+      parser_version: media_rss_v1
+      source_group: media_en
+      official: false
+
   decrypt_rss:
     key: decrypt_rss
     name: Decrypt RSS
@@ -275,7 +323,12 @@ sources:
     live_canary_status: NOT_EXECUTED
     last_canary_at:
     last_canary_error:
-    known_limitations: RSS 摘要按长度截断，全文字段不入库。
+    known_limitations: "RSS 摘要按长度截断，全文字段不入库。"
+    config:
+      parser_version: media_rss_v1
+      source_group: media_en
+      official: false
+
   cointelegraph_rss:
     key: cointelegraph_rss
     name: Cointelegraph RSS
@@ -300,4 +353,8 @@ sources:
     live_canary_status: NOT_EXECUTED
     last_canary_at:
     last_canary_error:
-    known_limitations: RSS 摘要按长度截断，全文字段不入库。
+    known_limitations: "RSS 摘要按长度截断，全文字段不入库。"
+    config:
+      parser_version: media_rss_v1
+      source_group: media_en
+      official: false

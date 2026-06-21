@@ -11,13 +11,14 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from app.adapters.registry import registry  # noqa: E402
-from app.core.config import load_sources, settings  # noqa: E402
+from app.core.config import SourceConfig, load_sources  # noqa: E402
 from app.core.errors import AccessDeniedError, FetchError, RobotsDisallowedError  # noqa: E402
 from app.fetch.client import FetchClient  # noqa: E402
 from app.fetch.rate_limit import HostRateLimiter  # noqa: E402
@@ -39,6 +40,7 @@ URL_QUERY_RE = re.compile(r"([?&](?:token|key|secret|signature|password)=)[^&\\s
 async def run(
     path: str,
     *,
+    catalog_dir: str | None = None,
     max_sources: int | None = None,
     include_disabled: bool = False,
     max_items_per_source: int = 10,
@@ -49,6 +51,12 @@ async def run(
         if include_disabled
         else sources_file.enabled_sources()
     )
+    if catalog_dir:
+        catalog_sources = _load_catalog_sources(Path(catalog_dir))
+        if include_disabled:
+            sources.extend(catalog_sources)
+        else:
+            sources.extend(source for source in catalog_sources if source.enabled)
     if max_sources is not None:
         sources = sources[:max_sources]
     results: list[dict[str, Any]] = []
@@ -80,7 +88,7 @@ async def run(
                 max_retries=1,
                 allow_private_networks=source.allow_private_networks,
                 allow_localhost=source.allow_localhost,
-                trust_env=bool(source.config.get("trust_env", settings.http_trust_env)),
+                trust_env=False,
             ) as fetch_client:
                 raw_documents = await adapter.fetch(source, fetch_client)
             parsed_items: list[NormalizedItem] = []
@@ -108,6 +116,7 @@ async def run(
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--sources-file", default="sources.yaml")
+    parser.add_argument("--catalog-dir", default=None)
     parser.add_argument("--max-sources", type=int, default=None)
     parser.add_argument("--include-disabled", action="store_true")
     parser.add_argument("--max-items-per-source", type=int, default=10)
@@ -121,6 +130,7 @@ def main() -> None:
     results = asyncio.run(
         run(
             args.sources_file,
+            catalog_dir=args.catalog_dir,
             max_sources=args.max_sources,
             include_disabled=args.include_disabled,
             max_items_per_source=max(1, min(args.max_items_per_source, 10)),
@@ -147,6 +157,70 @@ def _success_status(
     if not parsed_items:
         return "DEGRADED"
     return "PASS"
+
+
+def _load_catalog_sources(catalog_dir: Path) -> list[SourceConfig]:
+    if not catalog_dir.exists():
+        return []
+    loaded: list[SourceConfig] = []
+    for path in sorted(catalog_dir.glob("*.yaml")):
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        raw_sources = data.get("sources")
+        if not isinstance(raw_sources, dict):
+            continue
+        for key, raw in raw_sources.items():
+            if not isinstance(raw, dict):
+                continue
+            loaded.append(_catalog_source_config(str(key), raw))
+    return loaded
+
+
+def _catalog_source_config(key: str, raw: dict[str, Any]) -> SourceConfig:
+    config = dict(raw.get("config") or {})
+    parser = raw.get("parser")
+    if parser and not config.get("parser"):
+        config["parser"] = parser
+    parser_version = raw.get("parser_version")
+    if parser_version and not config.get("parser_version"):
+        config["parser_version"] = parser_version
+    if raw.get("max_items_per_fetch") and not config.get("max_items"):
+        config["max_items"] = raw["max_items_per_fetch"]
+
+    payload: dict[str, Any] = {
+        "key": key,
+        "name": raw["name"],
+        "display_name_zh": raw.get("display_name_zh"),
+        "source_group": raw.get("source_group", "legacy"),
+        "source_type": raw["source_type"],
+        "adapter": raw["adapter"],
+        "url": raw["url"],
+        "canonical_url": raw["canonical_url"],
+        "category": raw["category"],
+        "language": raw.get("language"),
+        "official": bool(raw.get("official", False)),
+        "trust_score": raw.get("trust_score", 50),
+        "poll_seconds": raw.get("poll_seconds", 300),
+        "timeout_seconds": raw.get("timeout_seconds", 15),
+        "max_response_bytes": raw.get(
+            "max_response_bytes",
+            raw.get("maximum_response_bytes", 2 * 1024 * 1024),
+        ),
+        "max_items_per_fetch": raw.get("max_items_per_fetch", 50),
+        "enabled": bool(raw.get("enabled", False)),
+        "allow_private_networks": bool(raw.get("allow_private_networks", False)),
+        "allow_localhost": bool(raw.get("allow_localhost", False)),
+        "ranking_provider": raw.get("ranking_provider"),
+        "ranking_position": raw.get("ranking_position"),
+        "ranking_snapshot_at": raw.get("ranking_snapshot_at"),
+        "parser_version": raw.get("parser_version", "v1"),
+        "supported_categories": raw.get("supported_categories") or [],
+        "health_status": raw.get("health_status", "unknown"),
+        "live_canary_status": raw.get("live_canary_status", "unknown"),
+        "last_canary_at": raw.get("last_canary_at"),
+        "last_canary_error": raw.get("last_canary_error"),
+        "config": config,
+    }
+    return SourceConfig.model_validate(payload)
 
 
 def _attach_sample(result: dict[str, Any], items: list[NormalizedItem]) -> None:
@@ -187,7 +261,7 @@ def _sanitize_error(exc: Exception) -> str:
     for name, value in os.environ.items():
         if value and len(value) >= 4 and SECRET_NAME_RE.search(name):
             message = message.replace(value, "<redacted>")
-    return _truncate(message.replace("\n", " "), limit=240)
+    return _truncate(message.replace("\n", " "), limit=240) or ""
 
 
 def _redact_source_url(url: str) -> str:

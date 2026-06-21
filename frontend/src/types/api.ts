@@ -47,7 +47,8 @@ export type PaginatedResponse<T> = {
   page_size: number;
 };
 export type FacetOption = {
-  value: string;
+  value?: string;
+  key?: string;
   label?: string;
   count?: number;
 };
@@ -112,6 +113,7 @@ export type AiProviderConfig = {
   auto_process_enabled: boolean;
   api_base?: string;
   configured?: boolean;
+  api_key_configured?: boolean;
   api_key_masked?: string | null;
   model?: string | null;
   timeout_seconds?: number;
@@ -125,13 +127,9 @@ export type AiProviderConfig = {
   last_tested_at?: string | null;
   last_test_status?: string | null;
   last_error_sanitized?: string | null;
-  usage_today?: {
-    prompt_tokens?: number;
-    completion_tokens?: number;
-    total_tokens?: number;
-    request_count?: number;
-    failure_count?: number;
-  };
+  tokens_today?: number;
+  requests_today?: number;
+  failures_today?: number;
 };
 export type AiModelInfo = {
   id: string;

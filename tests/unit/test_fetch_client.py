@@ -3,7 +3,7 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from app.core.errors import AccessDeniedError, RobotsDisallowedError
+from app.core.errors import AccessDeniedError, FetchError, RobotsDisallowedError
 from app.fetch.client import FetchClient
 from app.fetch.rate_limit import HostRateLimiter
 
@@ -57,4 +57,27 @@ async def test_robots_disallow_blocks_html_fetch() -> None:
     fetcher = FetchClient(client=client, rate_limiter=HostRateLimiter(0), max_retries=0)
     with pytest.raises(RobotsDisallowedError):
         await fetcher.get_text("https://example.com/blocked/page", respect_robots=True)
+    await fetcher.aclose()
+
+
+async def test_trusted_proxy_mode_still_enforces_dns_validation(monkeypatch) -> None:
+    import socket
+
+    def fake_getaddrinfo(*_args, **_kwargs):
+        raise socket.gaierror("deterministic dns failure")
+
+    monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text="ok", request=request)
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    fetcher = FetchClient(
+        client=client,
+        rate_limiter=HostRateLimiter(0),
+        trust_env=True,
+        validate_dns_rebinding=True,
+    )
+    with pytest.raises(FetchError):
+        await fetcher.get_text("https://example.com/feed")
     await fetcher.aclose()

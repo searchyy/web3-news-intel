@@ -26,6 +26,7 @@ jobs:
         run: >
           python scripts/live_source_canary.py
           --sources-file sources.yaml
+          --catalog-dir source_catalog
           --include-disabled
           --max-items-per-source 10
           --markdown-out artifacts/live-source-canary.md

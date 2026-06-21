@@ -125,8 +125,7 @@ const sortOptions = [
   { value: "first_seen_at", label: "首次发现时间" },
   { value: "published_at", label: "发布时间" },
   { value: "severity", label: "级别" },
-  { value: "trust_score", label: "可信度" },
-  { value: "ai_importance_score", label: "AI 重要度" }
+  { value: "trust_score", label: "可信度" }
 ];
 
 const directionOptions = [
@@ -870,7 +869,7 @@ function savedSearchToFilters(value: Record<string, unknown>): EventFilters {
 function facetOptions(facets?: FacetOption[], fallback: Array<{ value: string; label: string }> = []) {
   const seen = new Set<string>();
   const options = [...(facets ?? []), ...fallback].flatMap((item) => {
-    const value = item.value;
+    const value = item.value ?? ("key" in item ? item.key : undefined);
     if (!value || seen.has(value)) {
       return [];
     }

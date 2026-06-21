@@ -171,6 +171,7 @@ def _repo(workspace: Path | None = None, *, jobs: tuple[str, ...] | None = None)
         sorted(acceptance.REQUIRED_CI_JOBS | acceptance.EXPECTED_OPTIONAL_CI_JOBS)
     )
     workflow.write_text(_workflow(job_names), encoding="utf-8")
+    _write_required_workflows(repo)
     return repo
 
 
@@ -201,5 +202,34 @@ on:
     branches: [main]
   workflow_dispatch:
 jobs:
+{rendered_jobs}
+"""
+
+
+def _write_required_workflows(repo: Path) -> None:
+    workflow_dir = repo / ".github" / "workflows"
+    for filename, expected_jobs in acceptance.REQUIRED_WORKFLOW_JOBS.items():
+        if filename == "deepseek-test.yml":
+            triggers = "  workflow_dispatch:\n"
+        elif filename == "live-source-canary.yml":
+            triggers = "  schedule:\n    - cron: \"17 */12 * * *\"\n  workflow_dispatch:\n"
+        else:
+            triggers = "  pull_request:\n  push:\n    branches: [main]\n  workflow_dispatch:\n"
+        (workflow_dir / filename).write_text(
+            _workflow_with_triggers(tuple(sorted(expected_jobs)), triggers),
+            encoding="utf-8",
+        )
+
+
+def _workflow_with_triggers(jobs: tuple[str, ...], triggers: str) -> str:
+    rendered_jobs = "\n".join(
+        f"  {job}:\n    runs-on: ubuntu-latest\n    steps:\n      - run: true"
+        for job in jobs
+    )
+    return f"""name: Test Workflow
+permissions:
+  contents: read
+on:
+{triggers}jobs:
 {rendered_jobs}
 """

@@ -1,0 +1,27 @@
+{
+  "code": "000000",
+  "data": {
+    "catalogs": [
+      {
+        "catalogId": 48,
+        "catalogName": "New Cryptocurrency Listing",
+        "articles": [
+          {
+            "id": 277384,
+            "code": "4f90bec2f7984f71aaa9465830b1c6a6",
+            "title": "Binance Will List Re (RE) with Seed Tag Applied",
+            "type": 1,
+            "releaseDate": 1781776041424
+          },
+          {
+            "id": 277364,
+            "code": "81092181ec124efea616f591cf335c05",
+            "title": "Binance Futures Will List USD-M Quarterly Delivery Contracts",
+            "type": 1,
+            "releaseDate": 1781748033640
+          }
+        ]
+      }
+    ]
+  }
+}

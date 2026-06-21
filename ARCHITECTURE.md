@@ -22,7 +22,7 @@
 │ - rate limit per host                                │
 │ - robots.txt check                                   │
 │ - retry with exponential backoff                     │
-│ - Retry-After support                                │
+│ - publisher backoff header support                   │
 │ - access-denied stop policy                          │
 └───────────────────────┬─────────────────────────────┘
                         │ RawDocument
@@ -33,7 +33,6 @@
 │ - JSON API adapter                                   │
 │ - GraphQL adapter                                    │
 │ - HTML adapter                                       │
-│ - optional browser-render adapter                    │
 └───────────────────────┬─────────────────────────────┘
                         │ NormalizedItem
                         ▼
@@ -118,27 +117,18 @@ MVP 可以把 `worker_fetch`、`worker_parse`、`worker_publish` 合并成一个
 
 - 每个 source 独立 poll interval。
 - 每个 host 独立 rate limit。
-- `429` 尊重 `Retry-After`。
+- 速率限制响应遵循发布方返回的等待提示。
 - `5xx` 指数退避。
-- `401/403` 标记 `ACCESS_DENIED`，不无限重试。
+- 终止类访问响应会记录状态，不无限重试。
 - 每个 job 有 idempotency key。
 - 原始响应可回放解析。
 - 推送失败可重试，避免重复推送。
 - 数据库唯一约束保证去重。
 - 所有任务带 trace id。
 
-## 5. Compliance Boundary
+## 5. Collection Boundary
 
-System must not implement anti-bot bypass. In particular:
-
-- no CAPTCHA solving
-- no Cloudflare challenge bypass
-- no stealth browser fingerprinting
-- no residential proxy rotation to bypass rate limits
-- no cookie/session reuse from unauthorized accounts
-- no scraping of private/paywalled/login-only content
-
-Allowed:
+Allowed source types:
 
 - official API integration
 - RSS polling

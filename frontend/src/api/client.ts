@@ -1,20 +1,24 @@
-export type ApiOptions = RequestInit & { csrf?: string | null };
+export type ApiOptions = RequestInit & {
+  csrf?: string | null;
+  authRedirect?: boolean;
+};
 
 export async function api<T>(path: string, options: ApiOptions = {}): Promise<T> {
-  const headers = new Headers(options.headers);
-  if (options.body && !headers.has("Content-Type")) {
+  const { csrf, authRedirect, ...requestOptions } = options;
+  const headers = new Headers(requestOptions.headers);
+  if (requestOptions.body && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
-  if (options.csrf && !headers.has("X-CSRF-Token")) {
-    headers.set("X-CSRF-Token", options.csrf);
+  if (csrf && !headers.has("X-CSRF-Token")) {
+    headers.set("X-CSRF-Token", csrf);
   }
   const response = await fetch(path, {
-    ...options,
+    ...requestOptions,
     headers,
     credentials: "include"
   });
   if (!response.ok) {
-    if (response.status === 401 && typeof window !== "undefined") {
+    if (response.status === 401 && authRedirect !== false && typeof window !== "undefined") {
       redirectToLogin();
       throw new Error("Authentication required");
     }

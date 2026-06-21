@@ -204,6 +204,10 @@ def _github_actions_loader() -> type[yaml.SafeLoader]:
     class Loader(yaml.SafeLoader):
         pass
 
+    Loader.yaml_implicit_resolvers = {
+        first_char: list(resolvers)
+        for first_char, resolvers in yaml.SafeLoader.yaml_implicit_resolvers.items()
+    }
     for first_char, resolvers in list(Loader.yaml_implicit_resolvers.items()):
         Loader.yaml_implicit_resolvers[first_char] = [
             (tag, regexp)

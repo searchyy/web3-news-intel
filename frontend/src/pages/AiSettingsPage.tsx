@@ -42,7 +42,6 @@ type AiConfigForm = {
 const severityOptions = [
   { value: "low", label: "低" },
   { value: "normal", label: "普通" },
-  { value: "medium", label: "中" },
   { value: "high", label: "高" },
   { value: "critical", label: "严重" }
 ];
@@ -113,9 +112,12 @@ export function AiSettingsPage() {
   }, [configQuery.data, form]);
 
   const modelOptions = useMemo(() => normalizeModels(modelsQuery.data), [modelsQuery.data]);
-  const configured = Boolean(configQuery.data?.configured || configQuery.data?.api_key_masked);
+  const configured = Boolean(
+    configQuery.data?.api_key_configured ||
+      configQuery.data?.configured ||
+      configQuery.data?.api_key_masked
+  );
   const lastStatus = configQuery.data?.last_test_status || "not_tested";
-  const usage = configQuery.data?.usage_today ?? {};
 
   const saveConfig = useMutation({
     mutationFn: (values: AiConfigForm) => {
@@ -243,7 +245,7 @@ export function AiSettingsPage() {
 
           <Space wrap>
             <Form.Item label="最大输出 Tokens" name="max_tokens">
-              <InputNumber min={128} max={16_000} step={128} />
+              <InputNumber min={128} max={8192} step={128} />
             </Form.Item>
             <Form.Item label="超时时间（秒）" name="timeout_seconds">
               <InputNumber min={10} max={300} />
@@ -279,9 +281,9 @@ export function AiSettingsPage() {
         <Descriptions bordered size="small" column={{ xs: 1, md: 2 }}>
           <Descriptions.Item label="最近测试时间">{formatTime(configQuery.data?.last_tested_at)}</Descriptions.Item>
           <Descriptions.Item label="最近测试结果">{statusText[lastStatus] ?? lastStatus}</Descriptions.Item>
-          <Descriptions.Item label="今日 Token 使用量">{usage.total_tokens ?? 0}</Descriptions.Item>
-          <Descriptions.Item label="今日请求次数">{usage.request_count ?? 0}</Descriptions.Item>
-          <Descriptions.Item label="今日失败次数">{usage.failure_count ?? 0}</Descriptions.Item>
+          <Descriptions.Item label="今日 Token 使用量">{configQuery.data?.tokens_today ?? 0}</Descriptions.Item>
+          <Descriptions.Item label="今日请求次数">{configQuery.data?.requests_today ?? 0}</Descriptions.Item>
+          <Descriptions.Item label="今日失败次数">{configQuery.data?.failures_today ?? 0}</Descriptions.Item>
           <Descriptions.Item label="错误摘要">{configQuery.data?.last_error_sanitized || "无"}</Descriptions.Item>
         </Descriptions>
       </Card>

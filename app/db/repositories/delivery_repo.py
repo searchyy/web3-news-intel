@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -64,6 +64,18 @@ class DeliveryRepository:
         delivery.response_status = response_status
         delivery.last_error = None
         delivery.attempts += 1
+
+    def claim_sending(self, delivery: Delivery) -> bool:
+        result = self.session.execute(
+            update(Delivery)
+            .where(Delivery.id == delivery.id, Delivery.status.in_(["pending", "failed"]))
+            .values(status="sending")
+        )
+        claimed = result.rowcount == 1
+        if claimed:
+            self.session.flush()
+            self.session.refresh(delivery)
+        return claimed
 
     def mark_failed(
         self,

@@ -81,6 +81,8 @@ CATEGORY_KEYWORDS: tuple[tuple[str, tuple[str, ...]], ...] = (
         (
             "new listing",
             "will list",
+            "is now available",
+            "available on",
             "listing",
             "launchpool",
             "新增交易",

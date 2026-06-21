@@ -46,11 +46,14 @@ def parse_media_html(source: SourceConfig, raw: RawDocumentPayload) -> list[Norm
                 max_chars=int(config.get("summary_max_chars", SUMMARY_MAX_CHARS)),
             )
         author = clean_text(_optional_text(node, str(config.get("author_selector", ""))))
-        tags = [
-            clean
-            for candidate in node.select(str(config.get("tag_selector", "")))
-            if (clean := clean_text(candidate.get_text(" ", strip=True)))
-        ]
+        tag_selector = str(config.get("tag_selector", ""))
+        tags = []
+        if tag_selector:
+            tags = [
+                clean
+                for candidate in node.select(tag_selector)
+                if (clean := clean_text(candidate.get_text(" ", strip=True)))
+            ]
         published_text = _optional_text(node, str(config.get("date_selector", "")))
         published = parse_datetime(published_text)
         category, signals = classify_media_category(title, summary, tags, source.category)

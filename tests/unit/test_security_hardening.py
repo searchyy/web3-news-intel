@@ -47,8 +47,20 @@ def test_source_config_allows_localhost_when_explicit(monkeypatch) -> None:
     assert source.allow_localhost is True
 
 
-def test_enabled_source_dns_failure_fails_validation(monkeypatch) -> None:
+def test_enabled_source_skips_dns_availability_check_by_default(monkeypatch) -> None:
     monkeypatch.setattr("app.core.config.settings.http_validate_dns_rebinding", True)
+    monkeypatch.setattr("app.core.config.settings.http_validate_source_dns_on_load", False)
+
+    def fake_getaddrinfo(*_args, **_kwargs):
+        raise socket.gaierror("deterministic dns failure")
+
+    monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
+    source = _source(url="https://example.com/feed.xml", canonical_url="https://example.com/feed.xml")
+    assert source.enabled is True
+
+
+def test_source_config_can_opt_into_dns_validation_on_load(monkeypatch) -> None:
+    monkeypatch.setattr("app.core.config.settings.http_validate_source_dns_on_load", True)
 
     def fake_getaddrinfo(*_args, **_kwargs):
         raise socket.gaierror("deterministic dns failure")
@@ -59,7 +71,7 @@ def test_enabled_source_dns_failure_fails_validation(monkeypatch) -> None:
 
 
 def test_disabled_source_skips_dns_availability_check(monkeypatch) -> None:
-    monkeypatch.setattr("app.core.config.settings.http_validate_dns_rebinding", True)
+    monkeypatch.setattr("app.core.config.settings.http_validate_source_dns_on_load", True)
 
     def fake_getaddrinfo(*_args, **_kwargs):
         raise socket.gaierror("deterministic dns failure")
@@ -79,8 +91,26 @@ def test_production_url_security_defaults(monkeypatch) -> None:
     monkeypatch.delenv("HTTP_ALLOW_LOCALHOST", raising=False)
     settings = Settings(_env_file=None)
     assert settings.http_validate_dns_rebinding is True
+    assert settings.http_validate_source_dns_on_load is False
+    assert settings.http_trust_env is False
     assert settings.allow_private_networks is False
     assert settings.http_allow_localhost is False
+
+
+def test_local_admin_cookie_is_not_secure_by_default(monkeypatch) -> None:
+    monkeypatch.delenv("ADMIN_SECURE_COOKIE", raising=False)
+    settings = Settings(_env_file=None)
+    assert settings.admin_secure_cookie is False
+
+
+def test_production_requires_secure_admin_cookie(monkeypatch) -> None:
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("ADMIN_USERNAME", "admin")
+    monkeypatch.setenv("ADMIN_PASSWORD_HASH", "hash")
+    monkeypatch.setenv("ADMIN_SESSION_SECRET", "secret")
+    monkeypatch.setenv("ADMIN_SECURE_COOKIE", "false")
+    with pytest.raises(ValueError, match="ADMIN_SECURE_COOKIE"):
+        Settings(_env_file=None)
 
 
 @pytest.mark.parametrize(

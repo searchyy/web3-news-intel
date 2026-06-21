@@ -180,6 +180,13 @@ class DeliveryRead(BaseModel):
     created_at: datetime
 
 
+class DeliveryPage(BaseModel):
+    items: list[DeliveryRead]
+    total: int
+    page: int
+    page_size: int
+
+
 class AuditLogRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -192,6 +199,13 @@ class AuditLogRead(BaseModel):
     request_id: str
     ip_hash: str | None
     created_at: datetime
+
+
+class AuditLogPage(BaseModel):
+    items: list[AuditLogRead]
+    total: int
+    page: int
+    page_size: int
 
 
 class FeishuConfigBase(BaseModel):

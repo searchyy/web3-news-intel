@@ -73,6 +73,16 @@ def classify_media_category(
     for category, keywords in MEDIA_CATEGORY_KEYWORDS.items():
         if any(_keyword_matches(text, keyword.lower()) for keyword in keywords):
             matched.append(category)
+    for preferred in (
+        "newsflash",
+        "hack_security",
+        "token_unlock",
+        "exchange_repost",
+        "policy_regulatory",
+        "fundraising",
+    ):
+        if preferred in matched:
+            return preferred, matched
     return (matched[0] if matched else fallback), matched
 
 
