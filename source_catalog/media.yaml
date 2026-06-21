@@ -1,0 +1,303 @@
+version: 1
+ranking_snapshot_at: "2026-06-21"
+policy:
+  copyright_mode: metadata_summary_link_only
+  allowed_fields:
+    - title
+    - summary
+    - published_at
+    - author
+    - tags
+    - original_url
+  disallowed_fields:
+    - full_article_body
+    - raw_html
+    - login_cookie
+    - private_header
+    - paywalled_content
+  confirmation_rule: 媒体报道默认不是官方确认；重大事件需要多来源聚类或官方源确认。
+sources:
+  blockbeats_newsflash:
+    key: blockbeats_newsflash
+    name: BlockBeats Newsflash
+    display_name_zh: 律动 BlockBeats 快讯
+    source_group: media_zh
+    source_type: chinese_media
+    adapter: media_html
+    parser: blockbeats_newsflash_html
+    official: false
+    language: zh
+    category: newsflash
+    trust_score: 68
+    poll_seconds: 120
+    timeout_seconds: 15
+    maximum_response_bytes: 1048576
+    max_items_per_fetch: 20
+    enabled: true
+    url: https://m.theblockbeats.info/newsflash
+    canonical_url: https://m.theblockbeats.info/newsflash
+    parser_version: blockbeats_newsflash_html_v1
+    supported_categories:
+      - newsflash
+      - market
+      - funding
+      - policy_regulatory
+      - hack_security
+      - project_update
+      - token_unlock
+      - onchain
+      - exchange_repost
+    live_canary_status: NOT_EXECUTED
+    last_canary_at:
+    last_canary_error:
+    known_limitations: 使用公开快讯列表页，只解析标题、摘要、时间、标签和链接。
+  foresight_news:
+    key: foresight_news
+    name: Foresight News
+    display_name_zh: Foresight News
+    source_group: media_zh
+    source_type: chinese_media
+    adapter: media_html
+    parser: generic_media_html
+    official: false
+    language: zh
+    category: market
+    trust_score: 66
+    poll_seconds: 300
+    timeout_seconds: 15
+    maximum_response_bytes: 1048576
+    max_items_per_fetch: 20
+    enabled: false
+    url: https://foresightnews.pro/
+    canonical_url: https://foresightnews.pro/
+    parser_version: generic_media_html_v1
+    supported_categories: [newsflash, deep_article, market, funding, policy_regulatory, hack_security, project_update, token_unlock, onchain, exchange_repost]
+    live_canary_status: DISABLED
+    last_canary_at:
+    last_canary_error: 公开 RSS 或结构化接口待 live canary 验证，默认禁用。
+    known_limitations: 未验证公开入口前不宣称可用。
+  panews_news:
+    key: panews_news
+    name: PANews
+    display_name_zh: PANews
+    source_group: media_zh
+    source_type: chinese_media
+    adapter: media_json_api
+    parser: generic_media_json_api
+    official: false
+    language: zh
+    category: market
+    trust_score: 66
+    poll_seconds: 300
+    timeout_seconds: 15
+    maximum_response_bytes: 1048576
+    max_items_per_fetch: 20
+    enabled: false
+    url: https://www.panewslab.com/
+    canonical_url: https://www.panewslab.com/
+    parser_version: generic_media_json_api_v1
+    supported_categories: [newsflash, deep_article, market, funding, policy_regulatory, hack_security, project_update, token_unlock, onchain, exchange_repost]
+    live_canary_status: DISABLED
+    last_canary_at:
+    last_canary_error: 公开结构化接口待 live canary 验证，默认禁用。
+    known_limitations: 只允许采集公开列表字段；不保存文章全文。
+  odaily_newsflash:
+    key: odaily_newsflash
+    name: Odaily
+    display_name_zh: Odaily 星球日报快讯
+    source_group: media_zh
+    source_type: chinese_media
+    adapter: media_html
+    parser: generic_media_html
+    official: false
+    language: zh
+    category: newsflash
+    trust_score: 65
+    poll_seconds: 180
+    timeout_seconds: 15
+    maximum_response_bytes: 1048576
+    max_items_per_fetch: 20
+    enabled: false
+    url: https://www.odaily.news/
+    canonical_url: https://www.odaily.news/
+    parser_version: generic_media_html_v1
+    supported_categories: [newsflash, deep_article, market, funding, policy_regulatory, hack_security, project_update, token_unlock, onchain, exchange_repost]
+    live_canary_status: DISABLED
+    last_canary_at:
+    last_canary_error: 公开快讯接口待 live canary 验证，默认禁用。
+    known_limitations: 未验证 robots 和页面结构前不启用。
+  chaincatcher_news:
+    key: chaincatcher_news
+    name: ChainCatcher
+    display_name_zh: ChainCatcher
+    source_group: media_zh
+    source_type: chinese_media
+    adapter: media_html
+    parser: generic_media_html
+    official: false
+    language: zh
+    category: market
+    trust_score: 64
+    poll_seconds: 300
+    timeout_seconds: 15
+    maximum_response_bytes: 1048576
+    max_items_per_fetch: 20
+    enabled: false
+    url: https://www.chaincatcher.com/
+    canonical_url: https://www.chaincatcher.com/
+    parser_version: generic_media_html_v1
+    supported_categories: [newsflash, deep_article, market, funding, policy_regulatory, hack_security, project_update, token_unlock, onchain, exchange_repost]
+    live_canary_status: DISABLED
+    last_canary_at:
+    last_canary_error: 公开结构化入口待 live canary 验证，默认禁用。
+    known_limitations: HTML 解析需先验证 robots 和 selector 稳定性。
+  techflow_news:
+    key: techflow_news
+    name: TechFlow
+    display_name_zh: 深潮 TechFlow
+    source_group: media_zh
+    source_type: chinese_media
+    adapter: media_html
+    parser: generic_media_html
+    official: false
+    language: zh
+    category: market
+    trust_score: 64
+    poll_seconds: 300
+    timeout_seconds: 15
+    maximum_response_bytes: 1048576
+    max_items_per_fetch: 20
+    enabled: false
+    url: https://www.techflowpost.com/
+    canonical_url: https://www.techflowpost.com/
+    parser_version: generic_media_html_v1
+    supported_categories: [newsflash, deep_article, market, funding, policy_regulatory, hack_security, project_update, token_unlock, onchain, exchange_repost]
+    live_canary_status: DISABLED
+    last_canary_at:
+    last_canary_error: 公开入口待 live canary 验证，默认禁用。
+    known_limitations: 未验证公开列表结构前不启用。
+  jinse_news:
+    key: jinse_news
+    name: Jinse Finance
+    display_name_zh: 金色财经
+    source_group: media_zh
+    source_type: chinese_media
+    adapter: media_html
+    parser: generic_media_html
+    official: false
+    language: zh
+    category: market
+    trust_score: 62
+    poll_seconds: 300
+    timeout_seconds: 15
+    maximum_response_bytes: 1048576
+    max_items_per_fetch: 20
+    enabled: false
+    url: https://www.jinse.cn/
+    canonical_url: https://www.jinse.cn/
+    parser_version: generic_media_html_v1
+    supported_categories: [newsflash, deep_article, market, funding, policy_regulatory, hack_security, project_update, token_unlock, onchain, exchange_repost]
+    live_canary_status: DISABLED
+    last_canary_at:
+    last_canary_error: 公开结构化入口待 live canary 验证，默认禁用。
+    known_limitations: 只允许列表摘要字段，不保存正文。
+  coindesk_rss:
+    key: coindesk_rss
+    name: CoinDesk RSS
+    display_name_zh: CoinDesk RSS
+    source_group: media_en
+    source_type: tier1_media
+    adapter: media_rss
+    parser: generic_media_rss
+    official: false
+    language: en
+    category: market
+    trust_score: 72
+    poll_seconds: 300
+    timeout_seconds: 15
+    maximum_response_bytes: 1048576
+    max_items_per_fetch: 20
+    enabled: true
+    url: https://www.coindesk.com/arc/outboundfeeds/rss/
+    canonical_url: https://www.coindesk.com/arc/outboundfeeds/rss/
+    parser_version: media_rss_v1
+    supported_categories: [newsflash, deep_article, market, funding, policy_regulatory, hack_security, project_update, token_unlock, onchain, exchange_repost]
+    live_canary_status: NOT_EXECUTED
+    last_canary_at:
+    last_canary_error:
+    known_limitations: RSS 可能含 content 字段；解析器显式丢弃全文，仅保存摘要。
+  theblock_rss:
+    key: theblock_rss
+    name: The Block
+    display_name_zh: The Block
+    source_group: media_en
+    source_type: tier1_media
+    adapter: media_rss
+    parser: generic_media_rss
+    official: false
+    language: en
+    category: market
+    trust_score: 70
+    poll_seconds: 300
+    timeout_seconds: 15
+    maximum_response_bytes: 1048576
+    max_items_per_fetch: 20
+    enabled: false
+    url: https://www.theblock.co/
+    canonical_url: https://www.theblock.co/
+    parser_version: media_rss_v1
+    supported_categories: [deep_article, market, funding, policy_regulatory, hack_security, project_update, token_unlock, onchain, exchange_repost]
+    live_canary_status: DISABLED
+    last_canary_at:
+    last_canary_error: 公开 RSS 或结构化接口待 live canary 验证，默认禁用。
+    known_limitations: 不绕过付费墙或登录墙。
+  decrypt_rss:
+    key: decrypt_rss
+    name: Decrypt RSS
+    display_name_zh: Decrypt RSS
+    source_group: media_en
+    source_type: tier1_media
+    adapter: media_rss
+    parser: generic_media_rss
+    official: false
+    language: en
+    category: market
+    trust_score: 69
+    poll_seconds: 300
+    timeout_seconds: 15
+    maximum_response_bytes: 1048576
+    max_items_per_fetch: 20
+    enabled: true
+    url: https://decrypt.co/feed
+    canonical_url: https://decrypt.co/feed
+    parser_version: media_rss_v1
+    supported_categories: [deep_article, market, funding, policy_regulatory, hack_security, project_update, token_unlock, onchain, exchange_repost]
+    live_canary_status: NOT_EXECUTED
+    last_canary_at:
+    last_canary_error:
+    known_limitations: RSS 摘要按长度截断，全文字段不入库。
+  cointelegraph_rss:
+    key: cointelegraph_rss
+    name: Cointelegraph RSS
+    display_name_zh: Cointelegraph RSS
+    source_group: media_en
+    source_type: tier1_media
+    adapter: media_rss
+    parser: generic_media_rss
+    official: false
+    language: en
+    category: market
+    trust_score: 68
+    poll_seconds: 300
+    timeout_seconds: 15
+    maximum_response_bytes: 1048576
+    max_items_per_fetch: 20
+    enabled: true
+    url: https://cointelegraph.com/rss
+    canonical_url: https://cointelegraph.com/rss
+    parser_version: media_rss_v1
+    supported_categories: [newsflash, deep_article, market, funding, policy_regulatory, hack_security, project_update, token_unlock, onchain, exchange_repost]
+    live_canary_status: NOT_EXECUTED
+    last_canary_at:
+    last_canary_error:
+    known_limitations: RSS 摘要按长度截断，全文字段不入库。

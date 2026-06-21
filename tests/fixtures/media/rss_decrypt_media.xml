@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Decrypt</title>
+    <item>
+      <title>Security Firm Says ExampleFi Lost $4M in Exploit</title>
+      <link>https://decrypt.co/321000/examplefi-exploit</link>
+      <guid>decrypt-examplefi-exploit</guid>
+      <pubDate>Thu, 18 Jun 2026 08:30:00 GMT</pubDate>
+      <dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">Decrypt Reporter</dc:creator>
+      <category>Security</category>
+      <description>ExampleFi paused contracts after a reported exploit.</description>
+    </item>
+  </channel>
+</rss>
