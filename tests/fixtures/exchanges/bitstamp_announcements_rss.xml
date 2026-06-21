@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Bitstamp Test Feed</title>
+    <item>
+      <title>Bitstamp updates TEST trading rules</title>
+      <link>https://blog.bitstamp.net/post/test-trading-rules</link>
+      <guid>bitstamp-test-rules</guid>
+      <pubDate>Wed, 17 Jun 2026 10:15:00 GMT</pubDate>
+      <description>Sanitized trading rule fixture.</description>
+    </item>
+  </channel>
+</rss>

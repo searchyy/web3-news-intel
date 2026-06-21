@@ -1,0 +1,507 @@
+ranking_snapshot:
+  ranking_provider: "CoinGecko Trust Score"
+  ranking_snapshot_at: "2026-06-21"
+  note: "初始 Top 10 快照仅用于本版本 source catalog 种子，不代表永久排名。"
+
+defaults:
+  source_group: "exchange_official"
+  source_type: "exchange_official"
+  official: true
+  poll_seconds: 120
+  timeout_seconds: 15
+  maximum_response_bytes: 2097152
+  max_items_per_fetch: 20
+  live_canary_max_items: 10
+  supported_categories:
+    - "listing"
+    - "delisting"
+    - "derivatives_listing"
+    - "derivatives_delisting"
+    - "wallet_maintenance"
+    - "deposit_withdrawal"
+    - "system_maintenance"
+    - "security_incident"
+    - "trading_rule"
+    - "product"
+    - "regulatory"
+
+sources:
+  coinbase_exchange:
+    name: "Coinbase Exchange"
+    display_name_zh: "Coinbase Exchange 官方公告"
+    source_group: "exchange_official"
+    source_type: "exchange_official"
+    adapter: "rss"
+    parser: "exchange_rss"
+    official: true
+    language: "en"
+    category: "product"
+    trust_score: 94
+    poll_seconds: 300
+    timeout_seconds: 15
+    maximum_response_bytes: 2097152
+    max_items_per_fetch: 20
+    enabled: false
+    ranking_provider: "CoinGecko Trust Score"
+    ranking_position: 1
+    ranking_snapshot_at: "2026-06-21"
+    parser_version: "coinbase_exchange_rss_v1"
+    supported_categories: ["listing", "delisting", "product", "regulatory", "trading_rule"]
+    url: "https://www.coinbase.com/blog/rss.xml"
+    canonical_url: "https://www.coinbase.com/blog"
+    live_canary_status: "DISABLED"
+    last_canary_at: null
+    last_canary_error: "未确认存在稳定的交易所公告专用公开 RSS/JSON；避免把通用博客误报为上币公告源。"
+    official_alternative: "Coinbase 官方博客、Coinbase Assets 官方公告渠道。"
+    config:
+      parser_version: "coinbase_exchange_rss_v1"
+      source_group: "exchange_official"
+      official: true
+
+  binance_announcements:
+    name: "Binance"
+    display_name_zh: "Binance 官方公告"
+    source_group: "exchange_official"
+    source_type: "exchange_official"
+    adapter: "json_api"
+    parser: "exchange_json"
+    official: true
+    language: "en"
+    category: "listing"
+    trust_score: 95
+    poll_seconds: 120
+    timeout_seconds: 15
+    maximum_response_bytes: 2097152
+    max_items_per_fetch: 20
+    enabled: true
+    ranking_provider: "CoinGecko Trust Score"
+    ranking_position: 2
+    ranking_snapshot_at: "2026-06-21"
+    parser_version: "binance_announcements_json_v1"
+    supported_categories: ["listing", "delisting", "derivatives_listing", "wallet_maintenance", "deposit_withdrawal", "system_maintenance", "trading_rule", "product", "regulatory"]
+    url: "https://www.binance.info/bapi/composite/v1/public/cms/article/list/query?type=1&catalogId=48&pageNo=1&pageSize=20"
+    canonical_url: "https://www.binance.info/en/support/announcement/list/48"
+    live_canary_status: "NOT_RUN"
+    last_canary_at: null
+    last_canary_error: null
+    config:
+      parser_version: "binance_announcements_json_v1"
+      source_group: "exchange_official"
+      official: true
+      items_path: "data.catalogs.0.articles"
+      title_fields: ["title"]
+      date_fields: ["releaseDate"]
+      timestamp_unit: "milliseconds"
+      url_template: "https://www.binance.info/en/support/announcement/{code}"
+      id_fields: ["code", "id"]
+
+  kraken_announcements:
+    name: "Kraken"
+    display_name_zh: "Kraken 官方公告"
+    source_group: "exchange_official"
+    source_type: "exchange_official"
+    adapter: "rss"
+    parser: "exchange_rss"
+    official: true
+    language: "en"
+    category: "product"
+    trust_score: 92
+    poll_seconds: 300
+    timeout_seconds: 15
+    maximum_response_bytes: 2097152
+    max_items_per_fetch: 20
+    enabled: false
+    ranking_provider: "CoinGecko Trust Score"
+    ranking_position: 3
+    ranking_snapshot_at: "2026-06-21"
+    parser_version: "kraken_blog_rss_v1"
+    supported_categories: ["listing", "delisting", "derivatives_listing", "product", "regulatory", "trading_rule"]
+    url: "https://blog.kraken.com/feed"
+    canonical_url: "https://blog.kraken.com"
+    live_canary_status: "DISABLED"
+    last_canary_at: null
+    last_canary_error: "该入口是官方博客 RSS，不是交易所公告专用源；默认禁用，等待 live canary 和人工审批。"
+    official_alternative: "Kraken 官方博客和支持中心公告。"
+    config:
+      parser_version: "kraken_blog_rss_v1"
+      source_group: "exchange_official"
+      official: true
+
+  bitget_announcements:
+    name: "Bitget"
+    display_name_zh: "Bitget 官方公告"
+    source_group: "exchange_official"
+    source_type: "exchange_official"
+    adapter: "html"
+    parser: "exchange_html"
+    official: true
+    language: "en"
+    category: "listing"
+    trust_score: 91
+    poll_seconds: 300
+    timeout_seconds: 15
+    maximum_response_bytes: 2097152
+    max_items_per_fetch: 20
+    enabled: false
+    ranking_provider: "CoinGecko Trust Score"
+    ranking_position: 4
+    ranking_snapshot_at: "2026-06-21"
+    parser_version: "bitget_support_html_v1"
+    supported_categories: ["listing", "delisting", "deposit_withdrawal", "wallet_maintenance", "system_maintenance", "product", "regulatory"]
+    url: "https://www.bitget.com/support/sections/360004556551-New-Listings"
+    canonical_url: "https://www.bitget.com/support"
+    live_canary_status: "DISABLED"
+    last_canary_at: null
+    last_canary_error: "HTML 结构未经过 live canary；默认禁用，仅允许公开可访问页面。"
+    official_alternative: "Bitget Support 官方公告页。"
+    config:
+      parser_version: "bitget_support_html_v1"
+      source_group: "exchange_official"
+      official: true
+      item_selector: "a[href]"
+      title_selector: ".title"
+      date_selector: "time"
+
+  okx_announcements:
+    name: "OKX"
+    display_name_zh: "OKX 官方公告"
+    source_group: "exchange_official"
+    source_type: "exchange_official"
+    adapter: "html"
+    parser: "okx_help_app_state"
+    official: true
+    language: "en"
+    category: "listing"
+    trust_score: 92
+    poll_seconds: 120
+    timeout_seconds: 15
+    maximum_response_bytes: 2097152
+    max_items_per_fetch: 20
+    enabled: true
+    ranking_provider: "CoinGecko Trust Score"
+    ranking_position: 5
+    ranking_snapshot_at: "2026-06-21"
+    parser_version: "okx_help_app_state_v1"
+    supported_categories: ["listing", "delisting", "derivatives_listing", "deposit_withdrawal", "wallet_maintenance", "system_maintenance", "trading_rule", "product", "regulatory"]
+    url: "https://www.okx.com/help/section/announcements-new-listings"
+    canonical_url: "https://www.okx.com/help/section/announcements-new-listings"
+    live_canary_status: "NOT_RUN"
+    last_canary_at: null
+    last_canary_error: null
+    config:
+      parser_version: "okx_help_app_state_v1"
+      source_group: "exchange_official"
+      official: true
+      app_state_selector: "script#appState"
+      items_path: "appContext.initialProps.sectionData.articleList.list"
+      title_fields: ["title"]
+      date_fields: ["publishTime"]
+      timestamp_unit: "milliseconds"
+      url_template: "https://www.okx.com/help/{slug}"
+      id_fields: ["id", "slug"]
+
+  bybit_announcements:
+    name: "Bybit"
+    display_name_zh: "Bybit 官方公告"
+    source_group: "exchange_official"
+    source_type: "exchange_official"
+    adapter: "json_api"
+    parser: "exchange_json"
+    official: true
+    language: "en"
+    category: "product"
+    trust_score: 90
+    poll_seconds: 300
+    timeout_seconds: 15
+    maximum_response_bytes: 2097152
+    max_items_per_fetch: 20
+    enabled: false
+    ranking_provider: "CoinGecko Trust Score"
+    ranking_position: 6
+    ranking_snapshot_at: "2026-06-21"
+    parser_version: "bybit_announcements_json_v1"
+    supported_categories: ["listing", "delisting", "derivatives_listing", "derivatives_delisting", "deposit_withdrawal", "wallet_maintenance", "system_maintenance", "product", "regulatory"]
+    url: "https://announcements.bybit.com/en/"
+    canonical_url: "https://announcements.bybit.com/en/"
+    live_canary_status: "DISABLED"
+    last_canary_at: null
+    last_canary_error: "公开结构化接口未在本 Agent 环境确认；默认禁用，仅允许公开可访问接口。"
+    official_alternative: "Bybit Announcements 官方页面。"
+    config:
+      parser_version: "bybit_announcements_json_v1"
+      source_group: "exchange_official"
+      official: true
+      items_path: "result.list"
+      title_fields: ["title"]
+      summary_fields: ["description"]
+      date_fields: ["publishTime"]
+      timestamp_unit: "milliseconds"
+      url_fields: ["url"]
+      id_fields: ["id"]
+
+  bitstamp_announcements:
+    name: "Bitstamp by Robinhood"
+    display_name_zh: "Bitstamp by Robinhood 官方公告"
+    source_group: "exchange_official"
+    source_type: "exchange_official"
+    adapter: "rss"
+    parser: "exchange_rss"
+    official: true
+    language: "en"
+    category: "product"
+    trust_score: 88
+    poll_seconds: 300
+    timeout_seconds: 15
+    maximum_response_bytes: 2097152
+    max_items_per_fetch: 20
+    enabled: false
+    ranking_provider: "CoinGecko Trust Score"
+    ranking_position: 7
+    ranking_snapshot_at: "2026-06-21"
+    parser_version: "bitstamp_blog_rss_v1"
+    supported_categories: ["listing", "delisting", "product", "regulatory", "trading_rule"]
+    url: "https://blog.bitstamp.net/rss.xml"
+    canonical_url: "https://blog.bitstamp.net"
+    live_canary_status: "DISABLED"
+    last_canary_at: null
+    last_canary_error: "该入口是官方博客 RSS，未确认覆盖交易所公告；默认禁用，等待 canary。"
+    official_alternative: "Bitstamp 官方博客和支持中心公告。"
+    config:
+      parser_version: "bitstamp_blog_rss_v1"
+      source_group: "exchange_official"
+      official: true
+
+  gate_announcements:
+    name: "Gate"
+    display_name_zh: "Gate 官方公告"
+    source_group: "exchange_official"
+    source_type: "exchange_official"
+    adapter: "json_api"
+    parser: "exchange_json"
+    official: true
+    language: "en"
+    category: "listing"
+    trust_score: 87
+    poll_seconds: 300
+    timeout_seconds: 15
+    maximum_response_bytes: 2097152
+    max_items_per_fetch: 20
+    enabled: false
+    ranking_provider: "CoinGecko Trust Score"
+    ranking_position: 8
+    ranking_snapshot_at: "2026-06-21"
+    parser_version: "gate_announcements_json_v1"
+    supported_categories: ["listing", "delisting", "deposit_withdrawal", "wallet_maintenance", "system_maintenance", "product", "regulatory"]
+    url: "https://www.gate.com/announcements"
+    canonical_url: "https://www.gate.com/announcements"
+    live_canary_status: "DISABLED"
+    last_canary_at: null
+    last_canary_error: "公开结构化接口未在本 Agent 环境确认；默认禁用。"
+    official_alternative: "Gate 官方公告页。"
+    config:
+      parser_version: "gate_announcements_json_v1"
+      source_group: "exchange_official"
+      official: true
+      items_path: "data.list"
+      title_fields: ["title"]
+      summary_fields: ["description"]
+      date_fields: ["published_at", "publish_time"]
+      url_fields: ["url"]
+      id_fields: ["id"]
+
+  mexc_announcements:
+    name: "MEXC"
+    display_name_zh: "MEXC 官方公告"
+    source_group: "exchange_official"
+    source_type: "exchange_official"
+    adapter: "json_api"
+    parser: "exchange_json"
+    official: true
+    language: "en"
+    category: "listing"
+    trust_score: 86
+    poll_seconds: 300
+    timeout_seconds: 15
+    maximum_response_bytes: 2097152
+    max_items_per_fetch: 20
+    enabled: false
+    ranking_provider: "CoinGecko Trust Score"
+    ranking_position: 9
+    ranking_snapshot_at: "2026-06-21"
+    parser_version: "mexc_support_json_v1"
+    supported_categories: ["listing", "delisting", "derivatives_listing", "deposit_withdrawal", "wallet_maintenance", "system_maintenance", "product", "regulatory"]
+    url: "https://www.mexc.com/support/categories/360000254192"
+    canonical_url: "https://www.mexc.com/support"
+    live_canary_status: "DISABLED"
+    last_canary_at: null
+    last_canary_error: "公开结构化接口未在本 Agent 环境确认；默认禁用。"
+    official_alternative: "MEXC Support 官方公告页。"
+    config:
+      parser_version: "mexc_support_json_v1"
+      source_group: "exchange_official"
+      official: true
+      items_path: "data.articles"
+      title_fields: ["title"]
+      summary_fields: ["summary"]
+      date_fields: ["published_at", "updated_at"]
+      url_fields: ["url"]
+      id_fields: ["id"]
+
+  hashkey_announcements:
+    name: "HashKey Exchange"
+    display_name_zh: "HashKey Exchange 官方公告"
+    source_group: "exchange_official"
+    source_type: "exchange_official"
+    adapter: "html"
+    parser: "exchange_html"
+    official: true
+    language: "en"
+    category: "product"
+    trust_score: 85
+    poll_seconds: 300
+    timeout_seconds: 15
+    maximum_response_bytes: 2097152
+    max_items_per_fetch: 20
+    enabled: false
+    ranking_provider: "CoinGecko Trust Score"
+    ranking_position: 10
+    ranking_snapshot_at: "2026-06-21"
+    parser_version: "hashkey_announcements_html_v1"
+    supported_categories: ["listing", "delisting", "deposit_withdrawal", "wallet_maintenance", "system_maintenance", "product", "regulatory"]
+    url: "https://www.hashkey.com/en-US/announcement"
+    canonical_url: "https://www.hashkey.com/en-US/announcement"
+    live_canary_status: "DISABLED"
+    last_canary_at: null
+    last_canary_error: "HTML 结构未经过 live canary；默认禁用。"
+    official_alternative: "HashKey Exchange 官方公告页。"
+    config:
+      parser_version: "hashkey_announcements_html_v1"
+      source_group: "exchange_official"
+      official: true
+      item_selector: "a[href]"
+      title_selector: ".title"
+      date_selector: "time"
+
+  kucoin_announcements:
+    name: "KuCoin"
+    display_name_zh: "KuCoin 官方公告"
+    source_group: "exchange_official"
+    source_type: "exchange_official"
+    adapter: "html"
+    parser: "exchange_html"
+    official: true
+    language: "en"
+    category: "product"
+    trust_score: 82
+    poll_seconds: 300
+    timeout_seconds: 15
+    maximum_response_bytes: 2097152
+    max_items_per_fetch: 20
+    enabled: false
+    ranking_provider: "CoinGecko Trust Score"
+    ranking_position: null
+    ranking_snapshot_at: "2026-06-21"
+    parser_version: "kucoin_announcements_html_v1"
+    supported_categories: ["listing", "delisting", "product", "regulatory"]
+    url: "https://www.kucoin.com/announcement"
+    canonical_url: "https://www.kucoin.com/announcement"
+    live_canary_status: "DISABLED"
+    last_canary_at: null
+    last_canary_error: "候选源，默认不计入 Top 10。"
+    config:
+      parser_version: "kucoin_announcements_html_v1"
+      source_group: "exchange_official"
+      official: true
+
+  upbit_announcements:
+    name: "Upbit"
+    display_name_zh: "Upbit 官方公告"
+    source_group: "exchange_official"
+    source_type: "exchange_official"
+    adapter: "html"
+    parser: "exchange_html"
+    official: true
+    language: "ko"
+    category: "product"
+    trust_score: 82
+    poll_seconds: 300
+    timeout_seconds: 15
+    maximum_response_bytes: 2097152
+    max_items_per_fetch: 20
+    enabled: false
+    ranking_provider: "CoinGecko Trust Score"
+    ranking_position: null
+    ranking_snapshot_at: "2026-06-21"
+    parser_version: "upbit_notice_html_v1"
+    supported_categories: ["listing", "delisting", "deposit_withdrawal", "product", "regulatory"]
+    url: "https://upbit.com/service_center/notice"
+    canonical_url: "https://upbit.com/service_center/notice"
+    live_canary_status: "DISABLED"
+    last_canary_at: null
+    last_canary_error: "候选源，默认不计入 Top 10。"
+    config:
+      parser_version: "upbit_notice_html_v1"
+      source_group: "exchange_official"
+      official: true
+
+  htx_announcements:
+    name: "HTX"
+    display_name_zh: "HTX 官方公告"
+    source_group: "exchange_official"
+    source_type: "exchange_official"
+    adapter: "html"
+    parser: "exchange_html"
+    official: true
+    language: "en"
+    category: "product"
+    trust_score: 80
+    poll_seconds: 300
+    timeout_seconds: 15
+    maximum_response_bytes: 2097152
+    max_items_per_fetch: 20
+    enabled: false
+    ranking_provider: "CoinGecko Trust Score"
+    ranking_position: null
+    ranking_snapshot_at: "2026-06-21"
+    parser_version: "htx_support_html_v1"
+    supported_categories: ["listing", "delisting", "deposit_withdrawal", "product", "regulatory"]
+    url: "https://www.htx.com/support/en-us/list/360000039942"
+    canonical_url: "https://www.htx.com/support"
+    live_canary_status: "DISABLED"
+    last_canary_at: null
+    last_canary_error: "候选源，默认不计入 Top 10。"
+    config:
+      parser_version: "htx_support_html_v1"
+      source_group: "exchange_official"
+      official: true
+
+  crypto_com_exchange_announcements:
+    name: "Crypto.com Exchange"
+    display_name_zh: "Crypto.com Exchange 官方公告"
+    source_group: "exchange_official"
+    source_type: "exchange_official"
+    adapter: "html"
+    parser: "exchange_html"
+    official: true
+    language: "en"
+    category: "product"
+    trust_score: 80
+    poll_seconds: 300
+    timeout_seconds: 15
+    maximum_response_bytes: 2097152
+    max_items_per_fetch: 20
+    enabled: false
+    ranking_provider: "CoinGecko Trust Score"
+    ranking_position: null
+    ranking_snapshot_at: "2026-06-21"
+    parser_version: "crypto_com_exchange_announcements_html_v1"
+    supported_categories: ["listing", "delisting", "product", "regulatory"]
+    url: "https://crypto.com/exchange/announcements"
+    canonical_url: "https://crypto.com/exchange/announcements"
+    live_canary_status: "DISABLED"
+    last_canary_at: null
+    last_canary_error: "候选源，默认不计入 Top 10。"
+    config:
+      parser_version: "crypto_com_exchange_announcements_html_v1"
+      source_group: "exchange_official"
+      official: true

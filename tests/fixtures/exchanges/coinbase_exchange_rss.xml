@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Coinbase Exchange Test Feed</title>
+    <item>
+      <title>Coinbase will list TEST if liquidity conditions are met</title>
+      <link>https://www.coinbase.com/blog/test-listing</link>
+      <guid>coinbase-test-listing</guid>
+      <pubDate>Fri, 19 Jun 2026 12:00:00 GMT</pubDate>
+      <description>Sanitized fixture summary for a listing announcement.</description>
+    </item>
+  </channel>
+</rss>

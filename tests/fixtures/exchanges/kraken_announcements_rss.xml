@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Kraken Blog Test Feed</title>
+    <item>
+      <title>TEST is now available on Kraken</title>
+      <link>https://blog.kraken.com/product/test-available</link>
+      <guid>kraken-test-available</guid>
+      <pubDate>Thu, 18 Jun 2026 09:30:00 GMT</pubDate>
+      <description>Sanitized fixture summary.</description>
+    </item>
+  </channel>
+</rss>
