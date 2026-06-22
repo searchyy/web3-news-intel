@@ -33,14 +33,14 @@ describe("event pipeline client", () => {
   it("卡片预览和文本不会回显密钥或 webhook", () => {
     const preview = formatPipelinePreview({
       title: "飞书卡片",
-      FEISHU_APP_SECRET: "secret-value",
+      app_secret_for_test: "__example_secret_value__",
       webhook_url: "https://example.invalid/redacted-webhook/token",
       body: { text: "ok", token: "plain-token" }
     });
 
     expect(preview).toContain("飞书卡片");
     expect(preview).toContain("已隐藏");
-    expect(preview).not.toContain("secret-value");
+    expect(preview).not.toContain("__example_secret_value__");
     expect(preview).not.toContain("open-apis/bot");
     expect(redactSensitiveText("sk-test-secret-123456")).toBe("已隐藏");
   });
