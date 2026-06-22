@@ -28,7 +28,10 @@ def test_starting_services_become_healthy_after_polling(monkeypatch) -> None:
 def test_unhealthy_service_returns_failure_on_timeout(monkeypatch, capsys) -> None:
     monkeypatch.setattr(waiter.subprocess, "run", _runner([_services_json("unhealthy")]))
     assert waiter.main(["--timeout", "0"]) == 1
-    assert "Timed out waiting for compose health" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "Timed out waiting for compose health" in err
+    assert "::error title=Compose health timeout::" in err
+    assert "worker" in err
 
 
 def test_missing_required_service_returns_failure(monkeypatch, capsys) -> None:
@@ -36,7 +39,31 @@ def test_missing_required_service_returns_failure(monkeypatch, capsys) -> None:
     services = [service for service in services if service["Service"] != "worker"]
     monkeypatch.setattr(waiter.subprocess, "run", _runner([json.dumps(services)]))
     assert waiter.main(["--timeout", "0"]) == 1
-    assert "worker" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "worker" in err
+    assert "::error title=Compose health timeout::" in err
+
+
+def test_custom_required_services_are_checked(monkeypatch, capsys) -> None:
+    services = _services("healthy") + [
+        {"Service": "mock-deepseek", "Health": "healthy"},
+        {"Service": "mock-feishu", "Health": "healthy"},
+    ]
+    monkeypatch.setattr(waiter.subprocess, "run", _runner([json.dumps(services)]))
+    assert (
+        waiter.main(
+            [
+                "--timeout",
+                "0",
+                "--services",
+                "postgres,redis,mock-deepseek,mock-feishu",
+            ]
+        )
+        == 0
+    )
+    output = capsys.readouterr().out
+    assert "mock-deepseek" in output
+    assert "mock-feishu" in output
 
 
 def test_docker_executable_missing_returns_clear_failure(monkeypatch, capsys) -> None:

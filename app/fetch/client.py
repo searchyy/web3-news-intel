@@ -59,6 +59,7 @@ class FetchClient:
         allow_private_networks: bool | None = None,
         allow_localhost: bool | None = None,
         validate_dns_rebinding: bool | None = None,
+        trust_env: bool | None = None,
         backoff_base_seconds: float = 0.5,
     ):
         self.timeout_seconds = timeout_seconds or settings.http_timeout_seconds
@@ -78,6 +79,7 @@ class FetchClient:
             if validate_dns_rebinding is None
             else validate_dns_rebinding
         )
+        self.trust_env = settings.http_trust_env if trust_env is None else trust_env
         self.backoff_base_seconds = backoff_base_seconds
         self.rate_limiter = rate_limiter or HostRateLimiter(
             settings.http_per_host_rate_limit_seconds
@@ -90,7 +92,7 @@ class FetchClient:
             timeout=httpx.Timeout(self.timeout_seconds),
             headers=default_headers(),
             follow_redirects=False,
-            trust_env=False,
+            trust_env=self.trust_env,
         )
 
     async def aclose(self) -> None:
@@ -147,11 +149,12 @@ class FetchClient:
         last_error: Exception | None = None
         current_url = url
         redirects_seen = 0
+        resolve_dns = self.validate_dns_rebinding
         validate_public_http_url(
             current_url,
             allow_private_networks=self.allow_private_networks,
             allow_localhost=self.allow_localhost,
-            resolve_dns=self.validate_dns_rebinding,
+            resolve_dns=resolve_dns,
         )
         started = time.perf_counter()
         fetch_attempts_total.labels(method=method).inc()
@@ -179,7 +182,7 @@ class FetchClient:
                         current_url,
                         allow_private_networks=self.allow_private_networks,
                         allow_localhost=self.allow_localhost,
-                        resolve_dns=self.validate_dns_rebinding,
+                        resolve_dns=resolve_dns,
                     )
                 if response.status_code in TRANSIENT_STATUS_CODES and attempt <= self.max_retries:
                     delay = parse_retry_after(response.headers.get("Retry-After"))

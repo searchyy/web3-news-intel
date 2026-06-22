@@ -15,17 +15,15 @@ def due_sources(session: Session) -> list[Source]:
         .group_by(FetchRun.source_id)
         .subquery()
     )
-    candidates = session.scalars(
+    candidates = session.execute(
         select(Source)
+        .add_columns(latest_runs.c.last_started_at)
         .outerjoin(latest_runs, latest_runs.c.source_id == Source.id)
         .where(Source.enabled.is_(True))
     )
     now = utc_now()
     due: list[Source] = []
-    for source in candidates:
-        last_started_at = session.scalar(
-            select(func.max(FetchRun.started_at)).where(FetchRun.source_id == source.id)
-        )
+    for source, last_started_at in candidates:
         last_started_at = ensure_utc(last_started_at)
         if last_started_at is None or last_started_at <= now - timedelta(
             seconds=source.poll_seconds

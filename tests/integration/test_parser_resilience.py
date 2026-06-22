@@ -79,6 +79,60 @@ async def test_defillama_json_fixture_parses() -> None:
     assert items[0].raw["parser_version"] == "defillama_hacks_json_v1"
 
 
+async def test_binance_announcements_json_fixture_parses() -> None:
+    source = _source(
+        key="binance_listing",
+        source_type="exchange_official",
+        adapter="json_api",
+        url=(
+            "https://www.binance.com/bapi/composite/v1/public/cms/article/list/query"
+            "?type=1&catalogId=48&pageNo=1&pageSize=20"
+        ),
+        canonical_url="https://www.binance.com/en/support/announcement/list/48",
+        category="listing",
+        trust_score=95,
+        config={
+            "parser_version": "binance_announcements_json_v1",
+            "items_path": "data.catalogs.0.articles",
+            "title_fields": ["title"],
+            "date_fields": ["releaseDate"],
+            "timestamp_unit": "milliseconds",
+            "url_template": "https://www.binance.com/en/support/announcement/{code}",
+        },
+    )
+    items = await JSONAPIAdapter().parse(source, _raw(source, "json_binance_announcements.json"))
+    assert len(items) == 2
+    assert items[0].title == "Binance Will List Re (RE) with Seed Tag Applied"
+    assert items[0].url.endswith("/4f90bec2f7984f71aaa9465830b1c6a6")
+    assert items[0].published_at is not None
+    assert items[0].raw["parser_version"] == "binance_announcements_json_v1"
+
+
+async def test_okx_announcements_html_fixture_parses_app_state() -> None:
+    source = _source(
+        key="okx_listing",
+        source_type="exchange_official",
+        adapter="html",
+        url="https://www.okx.com/help/section/announcements-new-listings",
+        canonical_url="https://www.okx.com/help/section/announcements-new-listings",
+        category="listing",
+        trust_score=92,
+        config={
+            "parser": "okx_help_app_state",
+            "parser_version": "okx_help_app_state_v1",
+            "items_path": "appContext.initialProps.sectionData.articleList.list",
+            "url_template": "https://www.okx.com/help/{slug}",
+            "max_items": 20,
+        },
+    )
+    items = await HTMLAdapter().parse(source, _raw(source, "html_okx_announcements.html"))
+    assert len(items) == 2
+    assert items[0].title == "OKX will launch RE/USD for spot trading"
+    assert items[0].url.endswith("/okx-will-launch-re-usd-for-spot-trading")
+    assert items[0].published_at is not None
+    assert items[0].raw["parser_version"] == "okx_help_app_state_v1"
+
+
 async def test_empty_feed_returns_no_items() -> None:
     source = _source()
     assert await RSSAdapter().parse(source, _raw(source, "rss_empty.xml")) == []

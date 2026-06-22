@@ -1,15 +1,26 @@
 import { Button, Table, Typography } from "antd";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
+import { normalizePaginated } from "../api/pagination";
 import { useAuth } from "../auth/AuthContext";
-import type { Delivery } from "../types/api";
+import type { Delivery, PaginatedResponse } from "../types/api";
 
 export function DeliveriesPage() {
   const { csrf } = useAuth();
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
   const queryClient = useQueryClient();
-  const { data = [] } = useQuery({
-    queryKey: ["deliveries"],
-    queryFn: () => api<Delivery[]>("/api/admin/deliveries")
+  const { data, isLoading, isFetching } = useQuery({
+    queryKey: ["deliveries", page, pageSize],
+    queryFn: async () => {
+      const payload = await api<Delivery[] | PaginatedResponse<Delivery>>(
+        `/api/admin/deliveries?page=${page}&page_size=${pageSize}`
+      );
+      return normalizePaginated(payload, page, pageSize);
+    },
+    placeholderData: keepPreviousData,
+    staleTime: 30_000
   });
   const retry = useMutation({
     mutationFn: (id: number) => api(`/api/admin/deliveries/${id}/retry`, { method: "POST", csrf }),
@@ -20,7 +31,18 @@ export function DeliveriesPage() {
       <Typography.Title level={3}>投递记录</Typography.Title>
       <Table
         rowKey="id"
-        dataSource={data}
+        loading={isLoading || isFetching}
+        dataSource={data?.items ?? []}
+        pagination={{
+          current: data?.page ?? page,
+          pageSize: data?.page_size ?? pageSize,
+          total: data?.total ?? 0,
+          showSizeChanger: true,
+          onChange: (nextPage, nextPageSize) => {
+            setPage(nextPage);
+            setPageSize(nextPageSize);
+          }
+        }}
         columns={[
           { title: "ID", dataIndex: "id" },
           { title: "事件", dataIndex: "event_id" },

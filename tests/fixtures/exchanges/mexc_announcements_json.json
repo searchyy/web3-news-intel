@@ -1,0 +1,13 @@
+{
+  "data": {
+    "articles": [
+      {
+        "id": "mexc-test-maintenance",
+        "title": "MEXC Will Suspend TEST Deposits and Withdrawals",
+        "summary": "Sanitized deposit and withdrawal fixture.",
+        "published_at": "2026-06-15T06:00:00Z",
+        "url": "https://www.mexc.com/support/articles/mexc-test-maintenance"
+      }
+    ]
+  }
+}

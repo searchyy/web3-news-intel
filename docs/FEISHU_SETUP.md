@@ -28,7 +28,7 @@ Custom webhook mode is outbound-only compatibility mode. It cannot receive group
 
 Webhook URLs are encrypted at rest with `FIELD_ENCRYPTION_KEY`. The full URL is write-only and is never returned by the API after creation.
 
-Supported webhook hosts are restricted to Feishu/Lark public hosts. Localhost, private network, link-local, metadata service, and DNS rebinding targets remain blocked by default.
+Supported webhook hosts are restricted to Feishu/Lark public hosts and remain subject to URL safety checks.
 
 ## Anti-Flood Boundary
 

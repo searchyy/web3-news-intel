@@ -17,6 +17,20 @@ if config.config_file_name is not None:
 
 target_metadata = Base.metadata
 
+DB_MANAGED_INDEXES = {
+    "ix_events_title_trgm",
+    "ix_events_summary_trgm",
+    "ix_events_symbols_gin",
+    "ix_events_chains_gin",
+    "ix_events_entities_gin",
+}
+
+
+def include_object(object_, name, type_, reflected, compare_to) -> bool:  # noqa: ANN001
+    if type_ == "index" and name in DB_MANAGED_INDEXES:
+        return False
+    return True
+
 
 def run_migrations_offline() -> None:
     context.configure(
@@ -25,6 +39,7 @@ def run_migrations_offline() -> None:
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
         compare_type=True,
+        include_object=include_object,
     )
 
     with context.begin_transaction():
@@ -39,7 +54,12 @@ def run_migrations_online() -> None:
     )
 
     with connectable.connect() as connection:
-        context.configure(connection=connection, target_metadata=target_metadata, compare_type=True)
+        context.configure(
+            connection=connection,
+            target_metadata=target_metadata,
+            compare_type=True,
+            include_object=include_object,
+        )
 
         with context.begin_transaction():
             context.run_migrations()

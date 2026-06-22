@@ -1,0 +1,20 @@
+{
+  "items": [
+    {
+      "id": "missing-title",
+      "url": "https://example.com/announcements/missing-title",
+      "published_at": "2026-06-12T03:00:00Z"
+    },
+    {
+      "id": "missing-url",
+      "title": "Exchange Will List MISS",
+      "published_at": "2026-06-12T03:00:00Z"
+    },
+    {
+      "id": "valid",
+      "title": "Exchange Will List VALID",
+      "url": "https://example.com/announcements/valid",
+      "published_at": "2026-06-12T03:00:00Z"
+    }
+  ]
+}

@@ -12,6 +12,8 @@ from app.core.time import utc_now
 from app.db.models import Delivery, Event, Source
 from app.db.repositories.delivery_repo import DeliveryRepository
 from app.db.session import SessionLocal
+from app.integrations.ai.deepseek.errors import AIBudgetExceededError, AIRateLimitedError
+from app.integrations.ai.limits import ai_limit_controller
 from app.publishers.base import delivery_idempotency_key
 from app.workers.celery_app import celery_app
 
@@ -75,6 +77,120 @@ def worker_loss_idempotent(
     result = _ensure_acceptance_result(acceptance_key)
     result["worker_loss_attempts"] = attempts
     return result
+
+
+@celery_app.task(
+    bind=True,
+    name="app.workers.tasks_acceptance.ai_limit_hold",
+    max_retries=0,
+)
+def ai_limit_hold(
+    self,
+    acceptance_key: str,
+    *,
+    hold_seconds: float = 1.0,
+    max_concurrency: int = 1,
+    requests_per_minute: int = 60,
+) -> dict[str, Any]:
+    del self
+    _assert_acceptance_enabled()
+    provider = f"acceptance-{acceptance_key}"
+    redis_client = _redis()
+    try:
+        with ai_limit_controller.reserve(
+            provider,
+            max_concurrency=max_concurrency,
+            requests_per_minute=requests_per_minute,
+            daily_request_budget=0,
+            daily_token_budget=0,
+        ):
+            redis_client.set(f"acceptance:{acceptance_key}:ai_limit_started", "1", ex=120)
+            time.sleep(hold_seconds)
+            return {"status": "success", "provider": provider}
+    except AIRateLimitedError as exc:
+        return {
+            "status": "rate_limited",
+            "provider": provider,
+            "retry_after_seconds": int(getattr(exc, "retry_after_seconds", 1) or 1),
+        }
+
+
+@celery_app.task(
+    bind=True,
+    name="app.workers.tasks_acceptance.ai_request_budget_probe",
+    max_retries=0,
+)
+def ai_request_budget_probe(
+    self,
+    acceptance_key: str,
+    *,
+    daily_request_budget: int = 1,
+) -> dict[str, Any]:
+    del self
+    _assert_acceptance_enabled()
+    provider = f"acceptance-budget-{acceptance_key}"
+    try:
+        with ai_limit_controller.reserve(
+            provider,
+            max_concurrency=1,
+            requests_per_minute=60,
+            daily_request_budget=daily_request_budget,
+            daily_token_budget=0,
+        ):
+            return {"status": "success", "provider": provider}
+    except AIBudgetExceededError as exc:
+        return {"status": "budget_rejected", "provider": provider, "error": str(exc)}
+
+
+@celery_app.task(
+    bind=True,
+    name="app.workers.tasks_acceptance.ai_input_hash_once",
+    max_retries=5,
+)
+def ai_input_hash_once(
+    self,
+    acceptance_key: str,
+    *,
+    hold_seconds: float = 1.0,
+) -> dict[str, Any]:
+    _assert_acceptance_enabled()
+    provider = f"acceptance-dedupe-{acceptance_key}"
+    redis_client = _redis()
+    generated_key = f"acceptance:{acceptance_key}:ai_generated"
+    if redis_client.get(generated_key) is not None:
+        return {"status": "cached", "generated_count": int(redis_client.get(generated_key) or "1")}
+    try:
+        with ai_limit_controller.input_hash_lock(
+            f"{provider}:deepseek-chat:1:v1:fixed-input-hash",
+            ttl_seconds=30,
+        ):
+            if redis_client.get(generated_key) is not None:
+                return {
+                    "status": "cached",
+                    "generated_count": int(redis_client.get(generated_key) or "1"),
+                }
+            time.sleep(hold_seconds)
+            generated_count = int(redis_client.incr(generated_key))
+            redis_client.expire(generated_key, 120)
+            return {"status": "generated", "generated_count": generated_count}
+    except AIRateLimitedError as exc:
+        raise self.retry(
+            exc=exc,
+            countdown=int(getattr(exc, "retry_after_seconds", None) or 1),
+        ) from exc
+
+
+@celery_app.task(
+    bind=True,
+    name="app.workers.tasks_acceptance.record_if_executed",
+    max_retries=0,
+)
+def record_if_executed(self, acceptance_key: str) -> dict[str, Any]:
+    del self
+    _assert_acceptance_enabled()
+    redis_client = _redis()
+    redis_client.set(f"acceptance:{acceptance_key}:executed", "1", ex=120)
+    return {"status": "executed"}
 
 
 def _ensure_acceptance_result(acceptance_key: str) -> dict[str, Any]:

@@ -22,7 +22,15 @@ jobs:
         timeout-minutes: 2
       - run: python -m pip install -e ".[dev]"
         timeout-minutes: 5
-      - run: python scripts/live_source_canary.py --sources-file sources.yaml > artifacts/live-source-canary.json
+      - name: Run live source canary
+        run: >
+          python scripts/live_source_canary.py
+          --sources-file sources.yaml
+          --catalog-dir source_catalog
+          --include-disabled
+          --max-items-per-source 10
+          --markdown-out artifacts/live-source-canary.md
+          > artifacts/live-source-canary.json
         timeout-minutes: 5
       - if: always()
         uses: actions/upload-artifact@v4

@@ -13,9 +13,16 @@ from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import sessionmaker
 
 from app.db.models import Delivery, Event
+from app.integrations.ai.deepseek.errors import AIBudgetExceededError
+from app.integrations.ai.limits import ai_limit_controller
+from app.integrations.ai.schemas import AIUsageSnapshot
 from app.workers.celery_app import celery_app
 from app.workers.tasks_acceptance import (
+    ai_input_hash_once,
+    ai_limit_hold,
+    ai_request_budget_probe,
     create_event_once,
+    record_if_executed,
     transient_retry_once,
     worker_loss_idempotent,
 )
@@ -130,6 +137,103 @@ def test_worker_loss_requeues_and_remains_logically_idempotent() -> None:
 
     assert int(redis_client.get(f"acceptance:{key}:worker_loss_attempts") or "0") >= 2
     assert _db_counts(key) == (1, 1)
+
+
+def test_ai_redis_daily_token_budget_is_global() -> None:
+    _redis_url()
+    provider = f"acceptance-token-{uuid4().hex}"
+    ai_limit_controller.reset(provider)
+    ai_limit_controller.sync_daily_usage(
+        provider,
+        AIUsageSnapshot(tokens_today=10, requests_today=0, failures_today=0),
+    )
+
+    with pytest.raises(AIBudgetExceededError):
+        with ai_limit_controller.reserve(
+            provider,
+            max_concurrency=1,
+            requests_per_minute=60,
+            daily_request_budget=0,
+            daily_token_budget=10,
+        ):
+            pass
+
+
+def test_ai_request_budget_is_shared_by_real_workers() -> None:
+    _require_live_worker_tests()
+    key = f"budget-{uuid4().hex}"
+    queue = f"acceptance-{uuid4().hex}"
+    hostname = f"{queue}@localhost"
+    with _running_worker(queue, hostname):
+        first = ai_request_budget_probe.apply_async(args=[key], queue=queue).get(timeout=40)
+        second = ai_request_budget_probe.apply_async(args=[key], queue=queue).get(timeout=40)
+
+    assert first["status"] == "success"
+    assert second["status"] == "budget_rejected"
+
+
+def test_ai_global_concurrency_limit_is_shared_by_multiple_workers() -> None:
+    _require_live_worker_tests()
+    redis_client = redis.Redis.from_url(_redis_url(), decode_responses=True)
+    key = f"limit-{uuid4().hex}"
+    queue = f"acceptance-{uuid4().hex}"
+    first_hostname = f"{queue}-first@localhost"
+    second_hostname = f"{queue}-second@localhost"
+    with _running_worker(queue, first_hostname), _running_worker(queue, second_hostname):
+        first = ai_limit_hold.apply_async(
+            args=[key],
+            kwargs={"hold_seconds": 3.0, "max_concurrency": 1},
+            queue=queue,
+        )
+        _wait_for_redis_key(redis_client, f"acceptance:{key}:ai_limit_started", timeout_seconds=20)
+        second = ai_limit_hold.apply_async(
+            args=[key],
+            kwargs={"hold_seconds": 0.1, "max_concurrency": 1},
+            queue=queue,
+        ).get(timeout=40)
+        first_result = first.get(timeout=40)
+
+    assert first_result["status"] == "success"
+    assert second["status"] == "rate_limited"
+
+
+def test_ai_input_hash_dedupe_retries_and_generates_once_across_workers() -> None:
+    _require_live_worker_tests()
+    redis_client = redis.Redis.from_url(_redis_url(), decode_responses=True)
+    key = f"dedupe-{uuid4().hex}"
+    queue = f"acceptance-{uuid4().hex}"
+    first_hostname = f"{queue}-first@localhost"
+    second_hostname = f"{queue}-second@localhost"
+    with _running_worker(queue, first_hostname), _running_worker(queue, second_hostname):
+        first = ai_input_hash_once.apply_async(
+            args=[key],
+            kwargs={"hold_seconds": 2.0},
+            queue=queue,
+        )
+        second = ai_input_hash_once.apply_async(
+            args=[key],
+            kwargs={"hold_seconds": 2.0},
+            queue=queue,
+        )
+        results = [first.get(timeout=60), second.get(timeout=60)]
+
+    assert {item["status"] for item in results} == {"generated", "cached"}
+    assert {item["generated_count"] for item in results} == {1}
+    assert redis_client.get(f"acceptance:{key}:ai_generated") == "1"
+
+
+def test_revoked_task_is_not_executed_by_real_worker() -> None:
+    _require_live_worker_tests()
+    redis_client = redis.Redis.from_url(_redis_url(), decode_responses=True)
+    key = f"cancel-{uuid4().hex}"
+    queue = f"acceptance-{uuid4().hex}"
+    hostname = f"{queue}@localhost"
+    with _running_worker(queue, hostname):
+        result = record_if_executed.apply_async(args=[key], queue=queue, countdown=5)
+        celery_app.control.revoke(result.id)
+        time.sleep(7)
+
+    assert redis_client.get(f"acceptance:{key}:executed") is None
 
 
 class _running_worker:

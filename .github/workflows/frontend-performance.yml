@@ -1,0 +1,47 @@
+name: Frontend Performance
+
+permissions:
+  contents: read
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  frontend-performance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: npm ci --loglevel=warn
+        timeout-minutes: 5
+      - run: npm run build
+        timeout-minutes: 5
+      - name: Bundle performance contract
+        working-directory: .
+        run: >
+          python scripts/frontend_performance_acceptance.py
+          --dist-dir frontend/dist
+          --assert-charts-isolated
+          --json-out artifacts/frontend-performance.json
+          --markdown-out artifacts/frontend-performance.md
+        timeout-minutes: 2
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-performance-artifacts
+          path: artifacts

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:content="http://purl.org/rss/1.0/modules/content/">
+  <channel>
+    <title>CoinDesk</title>
+    <item>
+      <title>Protocol ABC Raises $20M Series A to Expand Ethereum Restaking Product</title>
+      <link>https://www.coindesk.com/business/2026/06/18/protocol-abc-raises-series-a/</link>
+      <guid>coindesk-abc-series-a</guid>
+      <pubDate>Thu, 18 Jun 2026 05:00:00 GMT</pubDate>
+      <author>markets@example.invalid (CoinDesk Reporter)</author>
+      <category>Funding</category>
+      <category>Ethereum</category>
+      <description>Protocol ABC said the funding will support product expansion.</description>
+      <content:encoded><![CDATA[This is a long article body that must never be copied into raw metadata or summary output by the media parser.]]></content:encoded>
+    </item>
+  </channel>
+</rss>

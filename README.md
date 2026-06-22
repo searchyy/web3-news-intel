@@ -70,7 +70,7 @@ Validate:
 python scripts/validate_sources.py sources.yaml
 ```
 
-Private, localhost, link-local, multicast, reserved, unspecified, and cloud metadata URLs are blocked by default. Production defaults are `HTTP_VALIDATE_DNS_REBINDING=true`, `HTTP_ALLOW_PRIVATE_NETWORKS=false`, and `HTTP_ALLOW_LOCALHOST=false`. Test fixtures must explicitly opt in with `APP_ENV=test` plus `HTTP_ALLOW_LOCALHOST=true`, or with a fixture-only source setting.
+URL safety checks are enabled by default. Test fixtures must explicitly opt in through test-only settings or fixture-only source configuration.
 
 ## Running One Source
 
@@ -124,8 +124,8 @@ The visual administration panel uses `/api/admin/auth/login`, Argon2 password ve
 
 ## Troubleshooting
 
-- `401/403` fetches are terminal and mark the source access denied.
-- `429` honors `Retry-After`.
+- Terminal access responses mark the source as unavailable.
+- Rate-limited responses honor publisher-provided backoff headers.
 - HTML sources respect `robots.txt`.
 - Dynamic HTML exchange and Chinese media sources are disabled until parser selectors are verified.
 - `/metrics` exposes bounded-cardinality Prometheus metrics; it does not label by full URL, title, event ID, or symbol.
@@ -149,10 +149,10 @@ Back up `sources.yaml`, `.env` secrets in your secret manager, and any retained 
 
 ## Compliance Boundaries
 
-This project intentionally does not implement CAPTCHA solving, Cloudflare challenge bypass, stealth browser fingerprinting, unauthorized cookie/session reuse, browser fingerprint spoofing, or proxy rotation to evade limits. It does not scrape private, paywalled, login-only, or unauthorized content.
+This project is scoped to public or explicitly approved sources.
 
-External calls are testable with mocks. Fetching enforces timeout, response-size limits, per-host rate limiting, safe redirects, and URL safety checks. Full copyrighted articles should not be bulk-copied unless the source license/API permits it.
+External calls are testable with mocks. Fetching enforces timeout, response-size limits, per-host rate limiting, safe redirects, and URL safety checks. Retained content should be limited to metadata, titles, summaries, source URLs, and permitted snippets.
 
 ## Production Deployment Caveats
 
-Run the `quality`, `postgres-integration`, `redis-celery-integration`, and `compose-acceptance` CI jobs before release. Configure `ADMIN_TOKEN`, publisher secrets, backups, log retention, alert routing, and infrastructure-level trusted proxy settings. Keep `HTTP_ALLOW_PRIVATE_NETWORKS=false`, `HTTP_ALLOW_LOCALHOST=false`, and `HTTP_VALIDATE_DNS_REBINDING=true` in production unless a site-owner-approved internal source is explicitly required. The separate live-source canary is scheduled and non-blocking for pull requests.
+Run the `quality`, `postgres-integration`, `redis-celery-integration`, and `compose-acceptance` CI jobs before release. Configure `ADMIN_TOKEN`, publisher secrets, backups, log retention, alert routing, infrastructure-level trusted proxy settings, and production URL safety defaults. The separate live-source canary is scheduled and non-blocking for pull requests.

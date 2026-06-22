@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterable
+from datetime import UTC, datetime
 from typing import Any
 
 from app.core.config import SourceConfig
@@ -42,15 +43,11 @@ class JSONAPIAdapter:
             title = _first(entry, source.config.get("title_fields", ["title", "name", "headline"]))
             if not title:
                 continue
-            url = _first(entry, source.config.get("url_fields", ["url", "link", "href"])) or raw.url
+            url = _entry_url(entry, source.config, raw.url)
             summary = _first(
                 entry, source.config.get("summary_fields", ["summary", "description", "details"])
             )
-            published = parse_datetime(
-                _first(
-                    entry, source.config.get("date_fields", ["published_at", "date", "timestamp"])
-                )
-            )
+            published = _entry_datetime(entry, source.config)
             items.append(
                 NormalizedItem(
                     title=str(title),
@@ -92,6 +89,9 @@ def _resolve_path(data: Any, path: str) -> Any:
     for part in path.split("."):
         if isinstance(current, dict):
             current = current.get(part)
+        elif isinstance(current, list) and part.isdigit():
+            index = int(part)
+            current = current[index] if 0 <= index < len(current) else None
         else:
             return None
     return current
@@ -102,6 +102,31 @@ def _first(entry: dict[str, Any], fields: list[str]) -> Any:
         if entry.get(field) not in (None, ""):
             return entry[field]
     return None
+
+
+def _entry_url(entry: dict[str, Any], config: dict[str, Any], fallback: str) -> str:
+    direct = _first(entry, config.get("url_fields", ["url", "link", "href"]))
+    if direct:
+        return str(direct)
+    template = config.get("url_template")
+    if template:
+        try:
+            return str(template).format(**entry)
+        except (KeyError, ValueError):
+            return fallback
+    return fallback
+
+
+def _entry_datetime(entry: dict[str, Any], config: dict[str, Any]) -> datetime | None:
+    raw_value = _first(entry, config.get("date_fields", ["published_at", "date", "timestamp"]))
+    if raw_value in (None, ""):
+        return None
+    if config.get("timestamp_unit") == "milliseconds" and isinstance(raw_value, int | float):
+        try:
+            return datetime.fromtimestamp(float(raw_value) / 1000, tz=UTC)
+        except (OSError, OverflowError, ValueError):
+            return None
+    return parse_datetime(raw_value)
 
 
 def _json_safe(entry: dict[str, Any]) -> dict[str, Any]:

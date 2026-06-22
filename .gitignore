@@ -25,6 +25,8 @@ htmlcov/
 celerybeat-schedule
 artifacts/
 reports/
+playwright-report/
+test-results/
 .idea/
 .vscode/
 dist/

@@ -6,16 +6,15 @@ Goal:
 Build a reliable, modular Web3/Crypto news intelligence crawler that collects official announcements, regulatory updates, exchange listings/delistings, protocol releases, governance proposals, on-chain/security signals, and selected media/newsflash sources. The system must normalize, deduplicate, score trust, cluster multiple reports into events, and publish alerts via Telegram/Discord/Webhook while exposing a FastAPI API.
 
 Hard constraints:
-1. Do not implement CAPTCHA solving, Cloudflare bypass, browser fingerprint spoofing, stealth plugins, or proxy rotation to bypass rate limits.
+1. Collect only public or explicitly approved sources and obey source-owner terms.
 2. Respect robots.txt for HTML sources by default.
-3. Respect Retry-After and rate limits.
-4. Stop on 401/403 and mark source/job as access denied.
-5. Do not scrape private, paywalled, login-only, or unauthorized content.
-6. Store only title, summary, metadata, source URL, and short snippets where allowed. Do not bulk-copy full copyrighted articles unless the source license/API permits it.
-7. All timestamps must be timezone-aware UTC.
-8. All external calls must be testable with mocks.
-9. Every module must have unit tests.
-10. Provide Docker Compose for local development.
+3. Respect publisher rate limits and backoff headers.
+4. Treat terminal access responses as non-retriable and record the source/job outcome.
+5. Store only title, summary, metadata, source URL, and short snippets where allowed. Do not bulk-copy full copyrighted articles unless the source license/API permits it.
+6. All timestamps must be timezone-aware UTC.
+7. All external calls must be testable with mocks.
+8. Every module must have unit tests.
+9. Provide Docker Compose for local development.
 
 Use:
 - Python 3.12
@@ -64,8 +63,8 @@ Phase 3: Fetch layer
   - per-host rate limit
   - robots.txt check
   - retry/backoff
-  - Retry-After
-  - stop on 401/403
+  - publisher backoff headers
+  - terminal access response handling
 - Add tests using respx
 
 Phase 4: Adapters
@@ -145,7 +144,7 @@ Definition of done:
 - `/health` returns ok
 - sample RSS fixture produces events
 - duplicate feed items do not create duplicate events
-- 429 uses Retry-After
-- 403 marks access denied
+- rate-limit responses use publisher backoff headers
+- terminal access responses are recorded without repeated retries
 - delivery is idempotent
 - README explains setup, source addition, operations, and compliance boundaries

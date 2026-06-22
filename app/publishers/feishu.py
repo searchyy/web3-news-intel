@@ -99,6 +99,9 @@ async def publish_feishu_once(
     )
     if delivery.status == "delivered":
         return delivery
+    if not repo.claim_sending(delivery):
+        return delivery
+    session.commit()
     result = await publisher.publish(event)
     if result.ok:
         repo.mark_delivered(

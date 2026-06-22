@@ -1,0 +1,10 @@
+{
+  "items": [
+    {
+      "id": "bad-date",
+      "title": "Exchange Will List DATE",
+      "url": "https://example.com/announcements/bad-date",
+      "published_at": "not-a-date"
+    }
+  ]
+}

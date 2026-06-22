@@ -21,7 +21,7 @@ Phase 13 status: local handoff checks pass, but release is `BLOCKED` because thi
 | API health | `compose-acceptance` | NOT EXECUTED | Compose stack did not start locally and no CI evidence exists |
 | Compose fixture E2E | `compose-acceptance` | NOT EXECUTED | Compose E2E script exists but has no current CI evidence |
 | Event/delivery idempotency | `compose-acceptance` | NOT EXECUTED | Covered by local fixture tests; Compose-backed evidence missing |
-| SSRF/DNS defaults | `quality/local` | PASS | Unit tests cover production defaults, DNS rebinding, blocked IP forms, redirects, source URLs, and webhook targets |
+| URL safety defaults | `quality/local` | PASS | Unit tests cover production defaults, blocked host/IP forms, redirects, source URLs, and webhook targets |
 
 ## Local Commands
 

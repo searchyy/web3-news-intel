@@ -40,9 +40,9 @@ Tasks:
 - Implement FetchClient
 
 Acceptance:
-- `429` waits according to `Retry-After`
+- rate-limit responses wait according to publisher backoff headers
 - `500` retries with backoff
-- `403` raises AccessDenied
+- terminal access responses raise AccessDenied
 - disallowed robots path is skipped
 
 ## Milestone 4 — Source Adapters

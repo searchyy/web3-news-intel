@@ -34,7 +34,7 @@ docker compose exec worker python scripts/replay_raw_document.py --raw-document-
 - scheduler heartbeat
 - Redis queue length
 - fetch error rate
-- 403/429 rate
+- access and rate-limit error rate
 - event creation rate
 - delivery failure rate
 
@@ -43,30 +43,24 @@ docker compose exec worker python scripts/replay_raw_document.py --raw-document-
 - max alerts per source per hour
 - max alerts per symbol per hour
 - suppress duplicate titles
-- critical severity bypasses most throttles
+- critical severity overrides most throttles
 - media-only rumors go to review channel
 
 ## Common Failure Modes
 
-### 429 Too Many Requests
+### Rate Limited
 
 Action:
-- respect Retry-After
+- respect publisher-provided backoff headers
 - reduce poll interval
 - lower per-host concurrency
 
-Do not:
-- rotate IPs to bypass limits
-
-### 403 Access Denied
+### Access Blocked
 
 Action:
 - disable source
 - use official API
 - request authorization
-
-Do not:
-- bypass challenges or reuse unauthorized cookies
 
 ### Parser Breakage
 

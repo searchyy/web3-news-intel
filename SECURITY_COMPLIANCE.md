@@ -16,13 +16,10 @@ Allowed:
 - authorized API keys
 - fixed authorized egress
 
-Disallowed:
-- CAPTCHA solving
-- Cloudflare/anti-bot bypass
-- stealth fingerprinting
-- unauthorized session cookies
-- proxy rotation to evade limits
-- private/paywalled/login-only content
+Scope:
+- collect only public or explicitly approved source data
+- follow source-owner terms and configured rate limits
+- keep URL safety checks enabled for external calls
 
 ## Data Retention
 

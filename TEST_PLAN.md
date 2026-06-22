@@ -3,7 +3,7 @@
 ## Unit Tests
 
 - retry policy
-- Retry-After parsing
+- publisher backoff header parsing
 - rate limiter
 - robots behavior
 - URL canonicalization

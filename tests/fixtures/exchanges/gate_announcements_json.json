@@ -1,0 +1,13 @@
+{
+  "data": {
+    "list": [
+      {
+        "id": "gate-test-delisting",
+        "title": "Gate Will Delist TEST Trading Pair",
+        "description": "Sanitized delisting fixture.",
+        "published_at": "2026-06-16T07:00:00Z",
+        "url": "https://www.gate.com/announcements/article/gate-test-delisting"
+      }
+    ]
+  }
+}

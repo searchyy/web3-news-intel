@@ -97,21 +97,47 @@ sources:
   binance_listing:
     name: "Binance New Listings"
     source_type: "exchange_official"
-    adapter: "html"
-    url: "https://www.binance.com/en/support/announcement/list/48"
-    canonical_url: "https://www.binance.com/en/support/announcement/list/48"
+    adapter: "json_api"
+    url: "https://www.binance.info/bapi/composite/v1/public/cms/article/list/query?type=1&catalogId=48&pageNo=1&pageSize=20"
+    canonical_url: "https://www.binance.info/en/support/announcement/list/48"
     category: "listing"
     language: "en"
     trust_score: 95
     poll_seconds: 120
     timeout_seconds: 15
     max_response_bytes: 2097152
-    enabled: false
+    enabled: true
     allow_private_networks: false
     allow_localhost: false
     config:
-      parser: "binance"
-      parser_version: "disabled_until_selectors_verified"
+      parser_version: "binance_announcements_json_v1"
+      items_path: "data.catalogs.0.articles"
+      title_fields: ["title"]
+      date_fields: ["releaseDate"]
+      timestamp_unit: "milliseconds"
+      url_template: "https://www.binance.info/en/support/announcement/{code}"
+      max_items: 20
+
+  okx_listing:
+    name: "OKX New Listings"
+    source_type: "exchange_official"
+    adapter: "html"
+    url: "https://www.okx.com/help/section/announcements-new-listings"
+    canonical_url: "https://www.okx.com/help/section/announcements-new-listings"
+    category: "listing"
+    language: "en"
+    trust_score: 92
+    poll_seconds: 120
+    timeout_seconds: 15
+    max_response_bytes: 2097152
+    enabled: true
+    allow_private_networks: false
+    allow_localhost: false
+    config:
+      parser: "okx_help_app_state"
+      parser_version: "okx_help_app_state_v1"
+      items_path: "appContext.initialProps.sectionData.articleList.list"
+      url_template: "https://www.okx.com/help/{slug}"
       max_items: 20
 
   blockbeats_newsflash:
@@ -126,10 +152,11 @@ sources:
     poll_seconds: 120
     timeout_seconds: 15
     max_response_bytes: 2097152
-    enabled: false
+    enabled: true
     allow_private_networks: false
     allow_localhost: false
     config:
-      parser: "chinese_media"
-      parser_version: "disabled_until_selectors_verified"
+      parser: "generic_html_listing"
+      parser_version: "blockbeats_newsflash_html_v1"
+      item_selector: "a[href^='/flash/']"
       max_items: 20

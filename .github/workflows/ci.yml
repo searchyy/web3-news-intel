@@ -87,6 +87,7 @@ jobs:
     env:
       DATABASE_URL: postgresql+psycopg://web3_news:web3_news@localhost:5432/web3_news_intel
       TEST_DATABASE_URL: postgresql+psycopg://web3_news:web3_news@localhost:5432/web3_news_intel
+      ACCEPTANCE_ARTIFACT_DIR: artifacts
       PYTEST_FAIL_ON_SKIP: "1"
     steps:
       - uses: actions/checkout@v4
@@ -130,7 +131,9 @@ jobs:
       - run: >
           python -m pytest tests/integration -q -m postgres
           --junitxml=artifacts/postgres-1.xml
-        timeout-minutes: 6
+        timeout-minutes: 10
+      - run: test -s artifacts/search-performance.json && test -s artifacts/search-performance.md
+        timeout-minutes: 1
       - run: set -o pipefail && alembic downgrade -1 2>&1 | tee artifacts/alembic-downgrade.log
         timeout-minutes: 2
       - run: set -o pipefail && alembic upgrade head 2>&1 | tee artifacts/alembic-upgrade-2.log
@@ -140,7 +143,9 @@ jobs:
       - run: >
           python -m pytest tests/integration -q -m postgres
           --junitxml=artifacts/postgres-2.xml
-        timeout-minutes: 6
+        timeout-minutes: 10
+      - run: test -s artifacts/search-performance.json && test -s artifacts/search-performance.md
+        timeout-minutes: 1
       - if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -230,6 +235,8 @@ jobs:
   compose-acceptance:
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    env:
+      COMPOSE_FILE: docker-compose.yml:docker-compose.acceptance.yml
     steps:
       - uses: actions/checkout@v4
       - run: mkdir -p artifacts
@@ -241,7 +248,9 @@ jobs:
       - run: docker compose up -d
         timeout-minutes: 5
       - name: Wait for Compose service health
-        run: python scripts/wait_compose_healthy.py --timeout 180
+        run: >
+          python scripts/wait_compose_healthy.py --timeout 240
+          --services postgres,redis,mock-deepseek,mock-feishu,api,worker,scheduler,frontend
         timeout-minutes: 4
       - name: Check API health
         run: |
@@ -259,10 +268,11 @@ jobs:
         timeout-minutes: 1
       - run: docker compose exec -T api python scripts/validate_sources.py sources.yaml
         timeout-minutes: 2
-      - run: docker compose exec -T api python scripts/compose_fixture_e2e.py
-        timeout-minutes: 3
-      - run: docker compose exec -T api python scripts/compose_feishu_e2e.py | tee artifacts/compose-feishu-e2e.json
-        timeout-minutes: 3
+      - name: Run full Compose mock E2E
+        run: >
+          docker compose exec -T api python scripts/compose_full_mock_e2e.py
+          | tee artifacts/compose-full-mock-e2e.json
+        timeout-minutes: 6
       - run: docker compose ps
         timeout-minutes: 1
       - if: always()

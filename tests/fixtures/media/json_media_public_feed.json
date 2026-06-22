@@ -1,0 +1,16 @@
+{
+  "data": {
+    "items": [
+      {
+        "id": "panews-1",
+        "title": "监管机构发布新的稳定币政策草案",
+        "summary": "草案要求发行方披露储备和赎回机制。",
+        "content": "完整文章正文不应被媒体解析器保存。",
+        "url": "https://example.com/news/stablecoin-policy",
+        "publishedAt": "2026-06-18T10:00:00Z",
+        "author": "PANews Reporter",
+        "tags": ["政策监管", "Stablecoin"]
+      }
+    ]
+  }
+}

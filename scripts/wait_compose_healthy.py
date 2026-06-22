@@ -13,25 +13,37 @@ REQUIRED_SERVICES = ("postgres", "redis", "api", "worker", "scheduler", "fronten
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--timeout", type=float, default=180.0)
+    parser.add_argument(
+        "--services",
+        default=",".join(REQUIRED_SERVICES),
+        help="Comma-separated Compose service names that must be healthy.",
+    )
     args = parser.parse_args(argv)
+    required_services = tuple(
+        service.strip() for service in args.services.split(",") if service.strip()
+    )
+    if not required_services:
+        print("No Compose services were requested", file=sys.stderr)
+        return 2
     deadline = time.monotonic() + args.timeout
     last_status: dict[str, str] = {}
     try:
         while True:
             services = _compose_services()
             last_status = _status_by_service(services)
-            missing = [service for service in REQUIRED_SERVICES if service not in last_status]
+            missing = [service for service in required_services if service not in last_status]
             unhealthy = [
                 service
-                for service in REQUIRED_SERVICES
+                for service in required_services
                 if last_status.get(service) not in {"healthy"}
             ]
             if not missing and not unhealthy:
                 print("All compose services are healthy:")
-                for service in REQUIRED_SERVICES:
+                for service in required_services:
                     print(f"- {service}: {last_status[service]}")
                 return 0
             if time.monotonic() >= deadline:
+                _emit_github_error(last_status, missing=missing, unhealthy=unhealthy)
                 print(
                     "Timed out waiting for compose health: "
                     f"{last_status}; missing={missing}; unhealthy={unhealthy}",
@@ -85,6 +97,17 @@ def _compose_services() -> list[dict[str, Any]]:
             raise RuntimeError("invalid docker compose JSON output") from exc
         return services
     raise RuntimeError("unexpected docker compose ps JSON output")
+
+
+def _emit_github_error(
+    last_status: dict[str, str], *, missing: list[str], unhealthy: list[str]
+) -> None:
+    payload = json.dumps(
+        {"status": last_status, "missing": missing, "unhealthy": unhealthy},
+        sort_keys=True,
+    )
+    sanitized = payload.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+    print(f"::error title=Compose health timeout::{sanitized}", file=sys.stderr)
 
 
 def _status_by_service(services: list[dict[str, Any]]) -> dict[str, str]:

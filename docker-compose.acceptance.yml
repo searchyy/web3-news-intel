@@ -1,0 +1,120 @@
+services:
+  mock-deepseek:
+    build: .
+    environment:
+      APP_ENV: ci
+      ENABLE_ACCEPTANCE_TASKS: "true"
+    command: python scripts/compose_mock_external.py --host 0.0.0.0 --port 9001
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail http://localhost:9001/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 5s
+
+  mock-feishu:
+    build: .
+    environment:
+      APP_ENV: ci
+      ENABLE_ACCEPTANCE_TASKS: "true"
+    command: python scripts/compose_mock_external.py --host 0.0.0.0 --port 9002
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail http://localhost:9002/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 5s
+
+  api:
+    environment: &acceptance-env
+      APP_ENV: ci
+      ENABLE_ACCEPTANCE_TASKS: "true"
+      ACCEPTANCE_MOCK_HTTP_ENABLED: "true"
+      AI_ALLOW_CUSTOM_API_BASE: "true"
+      DEEPSEEK_API_BASE: http://mock-deepseek:9001
+      FEISHU_ENABLED: "true"
+      FEISHU_SEND_ENABLED: "true"
+      FEISHU_API_BASE: http://mock-feishu:9002
+      FEISHU_APP_ID: compose-app
+      FEISHU_APP_SECRET: ${ACCEPTANCE_FEISHU_APP_SECRET:-mock-not-real}
+      FEISHU_ALLOWED_CHAT_IDS: oc_compose_mock
+      FIELD_ENCRYPTION_KEY: ${ACCEPTANCE_FIELD_ENCRYPTION_KEY:-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=}
+      ADMIN_USERNAME: admin
+      ADMIN_PASSWORD_HASH: $$argon2id$$v=19$$m=65536,t=3,p=4$$7/gPgZ3FsmTl2ODSi28BsQ$$21p2Tsd5G/23QF+1Sxam5S84EM6YiJHeyeVdey5gRw4
+      ADMIN_SESSION_SECRET: ${ACCEPTANCE_ADMIN_SESSION_SECRET:-mock-session-not-secret}
+      ADMIN_SECURE_COOKIE: "false"
+      PUBLIC_BASE_URL: http://frontend:8080
+      HTTP_VALIDATE_DNS_REBINDING: "false"
+      CELERY_REDIS_VISIBILITY_TIMEOUT_SECONDS: "30"
+      COMPOSE_E2E_API_BASE: http://127.0.0.1:8000
+      COMPOSE_E2E_FRONTEND_BASE: http://frontend:8080
+      COMPOSE_E2E_MOCK_DEEPSEEK_BASE: http://mock-deepseek:9001
+      COMPOSE_E2E_MOCK_FEISHU_BASE: http://mock-feishu:9002
+      COMPOSE_E2E_ADMIN_USERNAME: admin
+      COMPOSE_E2E_ADMIN_PASSWORD: compose-password
+      COMPOSE_E2E_FEISHU_CHAT_ID: oc_compose_mock
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      mock-deepseek:
+        condition: service_healthy
+      mock-feishu:
+        condition: service_healthy
+
+  worker:
+    command: >
+      celery -A app.workers.celery_app worker
+      --hostname=worker@%h
+      --pool=solo
+      --concurrency=1
+      --loglevel=INFO
+    environment:
+      <<: *acceptance-env
+      COMPOSE_E2E_API_BASE: ""
+      COMPOSE_E2E_FRONTEND_BASE: ""
+      COMPOSE_E2E_MOCK_DEEPSEEK_BASE: ""
+      COMPOSE_E2E_MOCK_FEISHU_BASE: ""
+      COMPOSE_E2E_ADMIN_PASSWORD: ""
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "celery -A app.workers.celery_app inspect ping --timeout=5 | grep -q pong",
+        ]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 30s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+      mock-deepseek:
+        condition: service_healthy
+      mock-feishu:
+        condition: service_healthy
+
+  scheduler:
+    environment:
+      <<: *acceptance-env
+      COMPOSE_E2E_API_BASE: ""
+      COMPOSE_E2E_FRONTEND_BASE: ""
+      COMPOSE_E2E_MOCK_DEEPSEEK_BASE: ""
+      COMPOSE_E2E_MOCK_FEISHU_BASE: ""
+      COMPOSE_E2E_ADMIN_PASSWORD: ""
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+      mock-deepseek:
+        condition: service_healthy
+      mock-feishu:
+        condition: service_healthy

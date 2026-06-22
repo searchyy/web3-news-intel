@@ -1,0 +1,20 @@
+{
+  "data": {
+    "catalogs": [
+      {
+        "articles": [
+          {
+            "code": "binance-test-listing",
+            "title": "Binance Will List TEST (TEST)",
+            "releaseDate": 1781870400000
+          },
+          {
+            "code": "binance-wallet-maintenance",
+            "title": "Binance Wallet Maintenance for Test Network",
+            "releaseDate": 1781784000000
+          }
+        ]
+      }
+    ]
+  }
+}

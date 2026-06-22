@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import asyncio
+import importlib
 import time
 import uuid
 from datetime import UTC, datetime, timedelta
 
+from celery.result import AsyncResult
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.admin_auth import (
@@ -20,31 +23,45 @@ from app.core.admin_auth import (
     set_session_cookies,
     verify_admin_password,
 )
-from app.core.config import settings
+from app.core.config import load_runtime_sources, settings
 from app.core.field_encryption import FieldEncryptor
 from app.core.time import utc_now
 from app.db.models import (
     AdminAuditLog,
+    AIRun,
     Delivery,
     Event,
     FetchRun,
     NotificationDestination,
     NotificationRule,
+    ReportSchedule,
     Source,
 )
+from app.db.repositories.event_search_repo import EventSearchRepository, SavedSearchRepository
 from app.db.repositories.notification_repo import NotificationRepository, write_audit_log
+from app.db.repositories.source_repo import SourceRepository
 from app.db.repositories.system_config_repo import SystemConfigRepository
 from app.db.session import get_session
+from app.integrations.ai.deepseek.errors import AIProviderError
+from app.integrations.ai.service import (
+    AIService,
+    provider_config_to_public_dict,
+    sanitize_error,
+)
 from app.integrations.feishu.client import FeishuClient, validate_feishu_webhook_url
 from app.integrations.feishu.errors import FeishuAuthenticationError
+from app.integrations.feishu.report_cards import event_ai_summary
+from app.integrations.feishu.reporting import FeishuReportService, next_run_at
 from app.integrations.feishu.token_provider import FeishuTokenProvider
 from app.publishers.feishu import publish_feishu_once
 from app.schemas.admin import (
     AdminAuthResponse,
     AdminLoginRequest,
+    AuditLogPage,
     AuditLogRead,
     BreakdownPoint,
     DashboardSummary,
+    DeliveryPage,
     DeliveryRead,
     DestinationCreate,
     DestinationPatch,
@@ -57,12 +74,73 @@ from app.schemas.admin import (
     RuleRead,
     TimeSeriesPoint,
 )
-from app.schemas.event import EventDetail, EventRead
+from app.schemas.ai import (
+    AIBatchSummaryRequest,
+    AIModelRead,
+    AIProviderConfigRead,
+    AIProviderConfigWrite,
+    AIQueuedTask,
+    AIRunPage,
+    AIRunRead,
+    AISummaryRequest,
+    AITaskStatus,
+    AITestResult,
+    EventAIInsightRead,
+)
+from app.schemas.event import EventDetail
+from app.schemas.event_search import (
+    EventFacets,
+    EventSearchPage,
+    EventSearchParams,
+    SavedSearchCreate,
+    SavedSearchPatch,
+    SavedSearchRead,
+)
+from app.schemas.feishu_report import (
+    ReportEventPreview,
+    ReportPreviewRead,
+    ReportRunResponse,
+    ReportScheduleCreate,
+    ReportSchedulePatch,
+    ReportScheduleRead,
+    ReportSendResultRead,
+)
 from app.schemas.source import SourceRead
+from app.workers.celery_app import celery_app
+from app.workers.tasks_feishu_reports import run_feishu_report_schedule
 from app.workers.tasks_fetch import fetch_source
 from app.workers.tasks_publish import republish_event
 
 router = APIRouter(prefix="/api/admin", tags=["admin-api"])
+
+
+class _UnavailableTask:
+    id = "ai-unavailable"
+
+    def delay(self, *_args, **_kwargs):
+        raise HTTPException(status_code=503, detail="AI task service unavailable")
+
+
+summarize_event_task = _UnavailableTask()
+summarize_event_batch_task = _UnavailableTask()
+
+
+def cancel_ai_task(_task_id: str) -> None:
+    raise HTTPException(status_code=503, detail="AI task service unavailable")
+
+
+def _optional_import(module_name: str):
+    try:
+        return importlib.import_module(module_name)
+    except ImportError:
+        return None
+
+
+_ai_tasks_module = _optional_import("app.workers.tasks_ai")
+if _ai_tasks_module is not None:
+    cancel_ai_task = _ai_tasks_module.cancel_ai_task
+    summarize_event_task = _ai_tasks_module.summarize_event
+    summarize_event_batch_task = _ai_tasks_module.summarize_event_batch
 
 
 @router.post("/auth/login", response_model=AdminAuthResponse)
@@ -193,32 +271,189 @@ def source_health(
     ]
 
 
-@router.get("/events", response_model=list[EventRead])
+@router.get("/events", response_model=EventSearchPage)
 def admin_events(
-    limit: int = Query(default=50, ge=1, le=200),
+    q: str | None = None,
+    q_mode: str = Query(default="all", pattern="^(all|any|phrase)$"),
+    source_keys: list[str] | None = Query(default=None),
+    source_groups: list[str] | None = Query(default=None),
+    categories: list[str] | None = Query(default=None),
+    severities: list[str] | None = Query(default=None),
+    statuses: list[str] | None = Query(default=None),
+    symbols: list[str] | None = Query(default=None),
+    chains: list[str] | None = Query(default=None),
+    languages: list[str] | None = Query(default=None),
+    official_only: bool | None = None,
+    minimum_trust_score: int | None = Query(default=None, ge=0, le=100),
+    has_ai_summary: bool | None = None,
+    published_from: datetime | None = None,
+    published_to: datetime | None = None,
+    first_seen_from: datetime | None = None,
+    first_seen_to: datetime | None = None,
+    sort: str = Query(default="published_at"),
+    direction: str = Query(default="desc", pattern="^(asc|desc)$"),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=500),
+    limit: int | None = Query(default=None, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     severity: str | None = None,
     status_value: str | None = Query(default=None, alias="status"),
     category: str | None = None,
-    sort: str = Query(default="published_at_desc"),
     _: AdminPrincipal = Depends(require_admin_session),
     session: Session = Depends(get_session),
-) -> list[EventRead]:
-    order = {
-        "published_at_desc": Event.published_at.desc().nullslast(),
-        "first_seen_at_desc": Event.first_seen_at.desc(),
-        "severity_desc": Event.severity.desc(),
-    }.get(sort)
-    if order is None:
-        raise HTTPException(status_code=400, detail="unsupported sort")
-    stmt = select(Event).order_by(order).offset(offset).limit(limit)
-    if severity:
-        stmt = stmt.where(Event.severity == severity)
-    if status_value:
-        stmt = stmt.where(Event.status == status_value)
-    if category:
-        stmt = stmt.where(Event.category == category)
-    return [EventRead.model_validate(event) for event in session.scalars(stmt)]
+) -> EventSearchPage:
+    params = _event_search_params(
+        q=q,
+        q_mode=q_mode,
+        source_keys=source_keys,
+        source_groups=source_groups,
+        categories=categories,
+        severities=severities,
+        statuses=statuses,
+        symbols=symbols,
+        chains=chains,
+        languages=languages,
+        official_only=official_only,
+        minimum_trust_score=minimum_trust_score,
+        has_ai_summary=has_ai_summary,
+        published_from=published_from,
+        published_to=published_to,
+        first_seen_from=first_seen_from,
+        first_seen_to=first_seen_to,
+        sort=sort,
+        direction=direction,
+        page=page,
+        page_size=page_size,
+        limit=limit,
+        offset=offset,
+        severity=severity,
+        status_value=status_value,
+        category=category,
+    )
+    return EventSearchRepository(session).search(params)
+
+
+@router.get("/events/facets", response_model=EventFacets)
+def admin_event_facets(
+    q: str | None = None,
+    q_mode: str = Query(default="all", pattern="^(all|any|phrase)$"),
+    source_keys: list[str] | None = Query(default=None),
+    source_groups: list[str] | None = Query(default=None),
+    categories: list[str] | None = Query(default=None),
+    severities: list[str] | None = Query(default=None),
+    statuses: list[str] | None = Query(default=None),
+    symbols: list[str] | None = Query(default=None),
+    chains: list[str] | None = Query(default=None),
+    languages: list[str] | None = Query(default=None),
+    official_only: bool | None = None,
+    minimum_trust_score: int | None = Query(default=None, ge=0, le=100),
+    has_ai_summary: bool | None = None,
+    published_from: datetime | None = None,
+    published_to: datetime | None = None,
+    first_seen_from: datetime | None = None,
+    first_seen_to: datetime | None = None,
+    sort: str = Query(default="published_at"),
+    direction: str = Query(default="desc", pattern="^(asc|desc)$"),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=500),
+    _: AdminPrincipal = Depends(require_admin_session),
+    session: Session = Depends(get_session),
+) -> EventFacets:
+    params = _event_search_params(
+        q=q,
+        q_mode=q_mode,
+        source_keys=source_keys,
+        source_groups=source_groups,
+        categories=categories,
+        severities=severities,
+        statuses=statuses,
+        symbols=symbols,
+        chains=chains,
+        languages=languages,
+        official_only=official_only,
+        minimum_trust_score=minimum_trust_score,
+        has_ai_summary=has_ai_summary,
+        published_from=published_from,
+        published_to=published_to,
+        first_seen_from=first_seen_from,
+        first_seen_to=first_seen_to,
+        sort=sort,
+        direction=direction,
+        page=page,
+        page_size=page_size,
+    )
+    return EventSearchRepository(session).facets(params)
+
+
+@router.post("/saved-searches", response_model=SavedSearchRead, status_code=status.HTTP_201_CREATED)
+def create_saved_search(
+    payload: SavedSearchCreate,
+    request: Request,
+    _: None = Depends(require_csrf),
+    principal: AdminPrincipal = Depends(require_admin_session),
+    session: Session = Depends(get_session),
+) -> SavedSearchRead:
+    repo = SavedSearchRepository(session)
+    try:
+        saved = repo.create(principal.subject, payload)
+        _audit(session, principal, request, "create", "saved_search", str(saved.id), {})
+        session.commit()
+    except IntegrityError as exc:
+        session.rollback()
+        raise HTTPException(status_code=409, detail="saved search name already exists") from exc
+    return SavedSearchRead.model_validate(saved)
+
+
+@router.get("/saved-searches", response_model=list[SavedSearchRead])
+def list_saved_searches(
+    principal: AdminPrincipal = Depends(require_admin_session),
+    session: Session = Depends(get_session),
+) -> list[SavedSearchRead]:
+    return [
+        SavedSearchRead.model_validate(saved)
+        for saved in SavedSearchRepository(session).list(principal.subject)
+    ]
+
+
+@router.patch("/saved-searches/{saved_search_id}", response_model=SavedSearchRead)
+def patch_saved_search(
+    saved_search_id: int,
+    payload: SavedSearchPatch,
+    request: Request,
+    _: None = Depends(require_csrf),
+    principal: AdminPrincipal = Depends(require_admin_session),
+    session: Session = Depends(get_session),
+) -> SavedSearchRead:
+    repo = SavedSearchRepository(session)
+    saved = repo.get_for_owner(saved_search_id, principal.subject)
+    if saved is None:
+        raise HTTPException(status_code=404, detail="saved search not found")
+    try:
+        saved = repo.update(saved, payload)
+        _audit(session, principal, request, "update", "saved_search", str(saved.id), {})
+        session.commit()
+    except IntegrityError as exc:
+        session.rollback()
+        raise HTTPException(status_code=409, detail="saved search name already exists") from exc
+    return SavedSearchRead.model_validate(saved)
+
+
+@router.delete("/saved-searches/{saved_search_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_saved_search(
+    saved_search_id: int,
+    request: Request,
+    _: None = Depends(require_csrf),
+    principal: AdminPrincipal = Depends(require_admin_session),
+    session: Session = Depends(get_session),
+) -> Response:
+    repo = SavedSearchRepository(session)
+    saved = repo.get_for_owner(saved_search_id, principal.subject)
+    if saved is None:
+        raise HTTPException(status_code=404, detail="saved search not found")
+    repo.delete(saved)
+    _audit(session, principal, request, "delete", "saved_search", str(saved_search_id), {})
+    session.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/events/{event_id}", response_model=EventDetail)
@@ -273,6 +508,7 @@ def admin_sources(
     _: AdminPrincipal = Depends(require_admin_session),
     session: Session = Depends(get_session),
 ) -> list[SourceRead]:
+    _sync_runtime_sources(session)
     return [SourceRead.model_validate(source) for source in session.scalars(select(Source))]
 
 
@@ -606,6 +842,380 @@ def test_feishu_connection(
     return result
 
 
+@router.get("/ai/providers/deepseek", response_model=AIProviderConfigRead)
+def get_deepseek_config(
+    _: AdminPrincipal = Depends(require_admin_session),
+    session: Session = Depends(get_session),
+) -> AIProviderConfigRead:
+    service = AIService(session)
+    config = service.get_or_create_provider_config("deepseek")
+    session.commit()
+    return AIProviderConfigRead.model_validate(
+        provider_config_to_public_dict(config, service.usage_today("deepseek"))
+    )
+
+
+@router.put("/ai/providers/deepseek", response_model=AIProviderConfigRead)
+def save_deepseek_config(
+    payload: AIProviderConfigWrite,
+    request: Request,
+    _: None = Depends(require_csrf),
+    principal: AdminPrincipal = Depends(require_admin_session),
+    session: Session = Depends(get_session),
+) -> AIProviderConfigRead:
+    service = AIService(session)
+    try:
+        config = service.save_provider_config(
+            payload.model_dump(exclude_unset=True),
+            provider="deepseek",
+        )
+    except (AIProviderError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=sanitize_error(exc)) from exc
+    _audit(
+        session,
+        principal,
+        request,
+        "update",
+        "system",
+        "ai-deepseek-config",
+        {"fields": list(payload.model_dump(exclude_unset=True, exclude={"api_key"}))},
+    )
+    session.commit()
+    return AIProviderConfigRead.model_validate(
+        provider_config_to_public_dict(config, service.usage_today("deepseek"))
+    )
+
+
+@router.delete("/ai/providers/deepseek/key", response_model=AIProviderConfigRead)
+def delete_deepseek_key(
+    request: Request,
+    _: None = Depends(require_csrf),
+    principal: AdminPrincipal = Depends(require_admin_session),
+    session: Session = Depends(get_session),
+) -> AIProviderConfigRead:
+    service = AIService(session)
+    config = service.delete_provider_key("deepseek")
+    _audit(session, principal, request, "delete", "system", "ai-deepseek-key", {})
+    session.commit()
+    return AIProviderConfigRead.model_validate(
+        provider_config_to_public_dict(config, service.usage_today("deepseek"))
+    )
+
+
+@router.post("/ai/providers/deepseek/test", response_model=AITestResult)
+async def test_deepseek_connection(
+    request: Request,
+    _: None = Depends(require_csrf),
+    principal: AdminPrincipal = Depends(require_admin_session),
+    session: Session = Depends(get_session),
+) -> AITestResult:
+    service = AIService(session)
+    try:
+        result = await service.test_connection("deepseek")
+    except Exception as exc:
+        session.commit()
+        _audit(
+            session,
+            principal,
+            request,
+            "test",
+            "system",
+            "ai-deepseek-config",
+            {"status": "failed"},
+        )
+        return AITestResult(status="failed", error=sanitize_error(exc))
+    _audit(
+        session,
+        principal,
+        request,
+        "test",
+        "system",
+        "ai-deepseek-config",
+        {"status": "success"},
+    )
+    session.commit()
+    return AITestResult.model_validate(result)
+
+
+@router.get("/ai/providers/deepseek/models", response_model=list[AIModelRead])
+async def list_deepseek_models(
+    _: AdminPrincipal = Depends(require_admin_session),
+    session: Session = Depends(get_session),
+) -> list[AIModelRead]:
+    try:
+        models = await AIService(session).list_models("deepseek")
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=sanitize_error(exc)) from exc
+    return [AIModelRead.model_validate(item) for item in models]
+
+
+@router.get("/ai/runs", response_model=AIRunPage)
+def list_ai_runs(
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=200),
+    limit: int | None = Query(default=None, ge=1, le=200),
+    offset: int | None = Query(default=None, ge=0),
+    _: AdminPrincipal = Depends(require_admin_session),
+    session: Session = Depends(get_session),
+) -> AIRunPage:
+    actual_limit = limit or page_size
+    actual_offset = offset if offset is not None else (page - 1) * page_size
+    stmt = select(AIRun).order_by(AIRun.created_at.desc())
+    total = int(session.scalar(select(func.count()).select_from(AIRun)) or 0)
+    rows = session.scalars(stmt.offset(actual_offset).limit(actual_limit))
+    return AIRunPage(
+        items=[AIRunRead.model_validate(row) for row in rows],
+        total=total,
+        page=page if offset is None else (actual_offset // actual_limit) + 1,
+        page_size=actual_limit,
+    )
+
+
+@router.post("/events/{event_id}/ai-summary", response_model=AIQueuedTask)
+def queue_event_ai_summary(
+    event_id: int,
+    payload: AISummaryRequest,
+    request: Request,
+    _: None = Depends(require_csrf),
+    principal: AdminPrincipal = Depends(require_admin_session),
+    session: Session = Depends(get_session),
+) -> AIQueuedTask:
+    if session.get(Event, event_id) is None:
+        raise HTTPException(status_code=404, detail="event not found")
+    task = summarize_event_task.delay(event_id, force=payload.force, auto=False)
+    _audit(session, principal, request, "run", "event_ai_summary", str(event_id), {})
+    session.commit()
+    return AIQueuedTask(queued=True, task_id=task.id, event_id=event_id)
+
+
+@router.post("/events/ai-summary-batch", response_model=AIQueuedTask)
+def queue_event_ai_summary_batch(
+    payload: AIBatchSummaryRequest,
+    request: Request,
+    _: None = Depends(require_csrf),
+    principal: AdminPrincipal = Depends(require_admin_session),
+    session: Session = Depends(get_session),
+) -> AIQueuedTask:
+    existing_count = int(
+        session.scalar(select(func.count(Event.id)).where(Event.id.in_(payload.event_ids))) or 0
+    )
+    if existing_count != len(set(payload.event_ids)):
+        raise HTTPException(status_code=404, detail="one or more events not found")
+    task = summarize_event_batch_task.delay(payload.event_ids, force=payload.force, auto=False)
+    _audit(
+        session,
+        principal,
+        request,
+        "run",
+        "event_ai_summary_batch",
+        None,
+        {"event_count": len(payload.event_ids)},
+    )
+    session.commit()
+    return AIQueuedTask(queued=True, task_id=task.id, event_ids=payload.event_ids)
+
+
+@router.get("/events/{event_id}/ai-insight", response_model=EventAIInsightRead)
+def get_event_ai_insight(
+    event_id: int,
+    _: AdminPrincipal = Depends(require_admin_session),
+    session: Session = Depends(get_session),
+) -> EventAIInsightRead:
+    insight = AIService(session).latest_insight(event_id)
+    if insight is None:
+        raise HTTPException(status_code=404, detail="AI insight not found")
+    return EventAIInsightRead.model_validate(insight)
+
+
+@router.get("/ai/tasks/{task_id}", response_model=AITaskStatus)
+def get_ai_task_status(
+    task_id: str,
+    _: AdminPrincipal = Depends(require_admin_session),
+) -> AITaskStatus:
+    result = AsyncResult(task_id, app=celery_app)
+    payload = None
+    if result.ready():
+        try:
+            payload = result.result
+        except Exception as exc:
+            payload = {"error": sanitize_error(exc)}
+    return AITaskStatus(task_id=task_id, status=result.status, result=payload)
+
+
+@router.post("/ai/tasks/{task_id}/cancel", response_model=AITaskStatus)
+def cancel_ai_task_endpoint(
+    task_id: str,
+    request: Request,
+    _: None = Depends(require_csrf),
+    principal: AdminPrincipal = Depends(require_admin_session),
+    session: Session = Depends(get_session),
+) -> AITaskStatus:
+    cancel_ai_task(task_id)
+    _audit(session, principal, request, "cancel", "ai_task", task_id, {})
+    session.commit()
+    return AITaskStatus(task_id=task_id, status="REVOKED", result={"cancelled": True})
+
+
+@router.get("/report-schedules", response_model=list[ReportScheduleRead])
+def list_report_schedules(
+    destination_id: uuid.UUID | None = None,
+    _: AdminPrincipal = Depends(require_admin_session),
+    session: Session = Depends(get_session),
+) -> list[ReportScheduleRead]:
+    stmt = select(ReportSchedule).order_by(ReportSchedule.created_at.desc())
+    if destination_id:
+        stmt = stmt.where(ReportSchedule.destination_id == destination_id)
+    return [ReportScheduleRead.model_validate(schedule) for schedule in session.scalars(stmt)]
+
+
+@router.post("/report-schedules", response_model=ReportScheduleRead)
+def create_report_schedule(
+    payload: ReportScheduleCreate,
+    request: Request,
+    _: None = Depends(require_csrf),
+    principal: AdminPrincipal = Depends(require_admin_session),
+    session: Session = Depends(get_session),
+) -> ReportScheduleRead:
+    destination = _destination_or_404(session, payload.destination_id)
+    _ensure_feishu_destination(destination)
+    now = utc_now()
+    schedule = ReportSchedule(**payload.model_dump())
+    if schedule.enabled:
+        schedule.activated_at = now
+        schedule.next_run_at = next_run_at(schedule, after=now)
+    session.add(schedule)
+    session.flush()
+    _audit(
+        session,
+        principal,
+        request,
+        "create",
+        "report_schedule",
+        str(schedule.id),
+        {"destination_id": str(destination.id), "report_type": schedule.report_type},
+    )
+    session.commit()
+    return ReportScheduleRead.model_validate(schedule)
+
+
+@router.get("/report-schedules/{schedule_id}", response_model=ReportScheduleRead)
+def get_report_schedule(
+    schedule_id: int,
+    _: AdminPrincipal = Depends(require_admin_session),
+    session: Session = Depends(get_session),
+) -> ReportScheduleRead:
+    return ReportScheduleRead.model_validate(_report_schedule_or_404(session, schedule_id))
+
+
+@router.patch("/report-schedules/{schedule_id}", response_model=ReportScheduleRead)
+def patch_report_schedule(
+    schedule_id: int,
+    payload: ReportSchedulePatch,
+    request: Request,
+    _: None = Depends(require_csrf),
+    principal: AdminPrincipal = Depends(require_admin_session),
+    session: Session = Depends(get_session),
+) -> ReportScheduleRead:
+    schedule = _report_schedule_or_404(session, schedule_id)
+    update = payload.model_dump(exclude_unset=True)
+    was_enabled = schedule.enabled
+    for field, value in update.items():
+        setattr(schedule, field, value)
+    now = utc_now()
+    if schedule.enabled and not was_enabled:
+        schedule.activated_at = now
+        schedule.last_window_start = None
+        schedule.last_window_end = None
+    schedule.next_run_at = next_run_at(schedule, after=now) if schedule.enabled else None
+    _audit(
+        session,
+        principal,
+        request,
+        "update",
+        "report_schedule",
+        str(schedule_id),
+        {"fields": list(update)},
+    )
+    session.commit()
+    return ReportScheduleRead.model_validate(schedule)
+
+
+@router.delete("/report-schedules/{schedule_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_report_schedule(
+    schedule_id: int,
+    request: Request,
+    _: None = Depends(require_csrf),
+    principal: AdminPrincipal = Depends(require_admin_session),
+    session: Session = Depends(get_session),
+) -> Response:
+    schedule = _report_schedule_or_404(session, schedule_id)
+    session.delete(schedule)
+    _audit(session, principal, request, "delete", "report_schedule", str(schedule_id), {})
+    session.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/report-schedules/{schedule_id}/preview", response_model=ReportPreviewRead)
+def preview_report_schedule(
+    schedule_id: int,
+    _: None = Depends(require_csrf),
+    __: AdminPrincipal = Depends(require_admin_session),
+    session: Session = Depends(get_session),
+) -> ReportPreviewRead:
+    schedule = _report_schedule_or_404(session, schedule_id)
+    preview = FeishuReportService(session).preview(schedule, now=utc_now())
+    return _report_preview_read(preview)
+
+
+@router.post("/report-schedules/{schedule_id}/run", response_model=ReportRunResponse)
+def enqueue_report_schedule(
+    schedule_id: int,
+    request: Request,
+    _: None = Depends(require_csrf),
+    principal: AdminPrincipal = Depends(require_admin_session),
+    session: Session = Depends(get_session),
+) -> ReportRunResponse:
+    _report_schedule_or_404(session, schedule_id)
+    run_feishu_report_schedule.delay(str(schedule_id))
+    _audit(session, principal, request, "run", "report_schedule", str(schedule_id), {})
+    session.commit()
+    return ReportRunResponse(schedule_id=schedule_id, queued=True)
+
+
+@router.post("/report-schedules/{schedule_id}/test-send", response_model=ReportSendResultRead)
+def test_send_report_schedule(
+    schedule_id: int,
+    request: Request,
+    _: None = Depends(require_csrf),
+    principal: AdminPrincipal = Depends(require_admin_session),
+    session: Session = Depends(get_session),
+) -> ReportSendResultRead:
+    schedule = _report_schedule_or_404(session, schedule_id)
+    outcome = asyncio.run(
+        FeishuReportService(
+            session,
+            encryptor=_field_encryptor_if_configured(),
+        ).send_test_report(schedule)
+    )
+    _audit(
+        session,
+        principal,
+        request,
+        "test_send",
+        "report_schedule",
+        str(schedule_id),
+        {"status": outcome.status, "dry_run": outcome.dry_run},
+    )
+    session.commit()
+    return ReportSendResultRead(
+        schedule_id=schedule_id,
+        delivery_id=outcome.delivery.id if outcome.delivery else None,
+        status=outcome.status,
+        dry_run=outcome.dry_run,
+        message=outcome.message,
+    )
+
+
 @router.get("/rules", response_model=list[RuleRead])
 def list_rules(
     _: AdminPrincipal = Depends(require_admin_session),
@@ -669,18 +1279,31 @@ def delete_rule(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@router.get("/deliveries", response_model=list[DeliveryRead])
+@router.get("/deliveries", response_model=DeliveryPage)
 def list_deliveries(
-    limit: int = Query(default=50, ge=1, le=200),
-    offset: int = Query(default=0, ge=0),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=200),
+    limit: int | None = Query(default=None, ge=1, le=200),
+    offset: int | None = Query(default=None, ge=0),
     status_value: str | None = Query(default=None, alias="status"),
     _: AdminPrincipal = Depends(require_admin_session),
     session: Session = Depends(get_session),
-) -> list[DeliveryRead]:
-    stmt = select(Delivery).order_by(Delivery.created_at.desc()).offset(offset).limit(limit)
+) -> DeliveryPage:
+    actual_limit = limit or page_size
+    actual_offset = offset if offset is not None else (page - 1) * page_size
+    stmt = select(Delivery)
     if status_value:
         stmt = stmt.where(Delivery.status == status_value)
-    return [DeliveryRead.model_validate(item) for item in session.scalars(stmt)]
+    total = int(session.scalar(select(func.count()).select_from(stmt.subquery())) or 0)
+    rows = session.scalars(
+        stmt.order_by(Delivery.created_at.desc()).offset(actual_offset).limit(actual_limit)
+    )
+    return DeliveryPage(
+        items=[DeliveryRead.model_validate(item) for item in rows],
+        total=total,
+        page=page if offset is None else (actual_offset // actual_limit) + 1,
+        page_size=actual_limit,
+    )
 
 
 @router.get("/deliveries/{delivery_id}", response_model=DeliveryRead)
@@ -728,16 +1351,131 @@ def canary_runs(_: AdminPrincipal = Depends(require_admin_session)) -> dict:
     return {"runs": []}
 
 
-@router.get("/audit-logs", response_model=list[AuditLogRead])
+@router.get("/audit-logs", response_model=AuditLogPage)
 def audit_logs(
-    limit: int = Query(default=100, ge=1, le=500),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=100, ge=1, le=500),
+    limit: int | None = Query(default=None, ge=1, le=500),
+    offset: int | None = Query(default=None, ge=0),
     _: AdminPrincipal = Depends(require_admin_session),
     session: Session = Depends(get_session),
-) -> list[AuditLogRead]:
+) -> AuditLogPage:
+    actual_limit = limit or page_size
+    actual_offset = offset if offset is not None else (page - 1) * page_size
+    total = int(session.scalar(select(func.count()).select_from(AdminAuditLog)) or 0)
     rows = session.scalars(
-        select(AdminAuditLog).order_by(AdminAuditLog.created_at.desc()).limit(limit)
+        select(AdminAuditLog)
+        .order_by(AdminAuditLog.created_at.desc())
+        .offset(actual_offset)
+        .limit(actual_limit)
     )
-    return [AuditLogRead.model_validate(row) for row in rows]
+    return AuditLogPage(
+        items=[AuditLogRead.model_validate(row) for row in rows],
+        total=total,
+        page=page if offset is None else (actual_offset // actual_limit) + 1,
+        page_size=actual_limit,
+    )
+
+
+def _event_search_params(
+    *,
+    q: str | None,
+    q_mode: str,
+    source_keys: list[str] | None,
+    source_groups: list[str] | None,
+    categories: list[str] | None,
+    severities: list[str] | None,
+    statuses: list[str] | None,
+    symbols: list[str] | None,
+    chains: list[str] | None,
+    languages: list[str] | None,
+    official_only: bool | None,
+    minimum_trust_score: int | None,
+    has_ai_summary: bool | None,
+    published_from: datetime | None,
+    published_to: datetime | None,
+    first_seen_from: datetime | None,
+    first_seen_to: datetime | None,
+    sort: str,
+    direction: str,
+    page: int,
+    page_size: int,
+    limit: int | None = None,
+    offset: int = 0,
+    severity: str | None = None,
+    status_value: str | None = None,
+    category: str | None = None,
+) -> EventSearchParams:
+    normalized_sort, normalized_direction = _normalize_event_sort(sort, direction)
+    if limit is not None:
+        page_size = limit
+        page = offset // limit + 1
+    return EventSearchParams(
+        q=q,
+        q_mode=q_mode,
+        source_keys=source_keys or [],
+        source_groups=source_groups or [],
+        categories=_with_legacy_value(categories, category),
+        severities=_with_legacy_value(severities, severity),
+        statuses=_with_legacy_value(statuses, status_value),
+        symbols=symbols or [],
+        chains=chains or [],
+        languages=languages or [],
+        official_only=official_only,
+        minimum_trust_score=minimum_trust_score,
+        has_ai_summary=has_ai_summary,
+        published_from=published_from,
+        published_to=published_to,
+        first_seen_from=first_seen_from,
+        first_seen_to=first_seen_to,
+        sort=normalized_sort,
+        direction=normalized_direction,
+        page=page,
+        page_size=page_size,
+    )
+
+
+def _sync_runtime_sources(session: Session) -> None:
+    repo = SourceRepository(session)
+    try:
+        sources = load_runtime_sources()
+    except FileNotFoundError:
+        return
+    for source in sources.values():
+        repo.upsert_from_config(source)
+    session.commit()
+
+
+def _with_legacy_value(values: list[str] | None, legacy: str | None) -> list[str]:
+    merged = list(values or [])
+    if legacy:
+        merged.append(legacy)
+    return merged
+
+
+def _normalize_event_sort(sort: str, direction: str) -> tuple[str, str]:
+    legacy = {
+        "published_at_desc": ("published_at", "desc"),
+        "published_at_asc": ("published_at", "asc"),
+        "first_seen_at_desc": ("first_seen_at", "desc"),
+        "first_seen_at_asc": ("first_seen_at", "asc"),
+        "severity_desc": ("severity", "desc"),
+        "severity_asc": ("severity", "asc"),
+    }
+    if sort in legacy:
+        return legacy[sort]
+    allowed = {
+        "published_at",
+        "first_seen_at",
+        "last_seen_at",
+        "trust_score",
+        "severity",
+        "confirmation_count",
+        "id",
+    }
+    if sort not in allowed:
+        raise HTTPException(status_code=400, detail="unsupported sort")
+    return sort, direction
 
 
 def _count(session: Session, model, *conditions) -> int:
@@ -752,6 +1490,50 @@ def _destination_or_404(session: Session, destination_id: uuid.UUID) -> Notifica
     if destination is None:
         raise HTTPException(status_code=404, detail="destination not found")
     return destination
+
+
+def _report_schedule_or_404(session: Session, schedule_id: int) -> ReportSchedule:
+    schedule = session.get(ReportSchedule, schedule_id)
+    if schedule is None:
+        raise HTTPException(status_code=404, detail="report schedule not found")
+    return schedule
+
+
+def _ensure_feishu_destination(destination: NotificationDestination) -> None:
+    if destination.provider not in {"feishu_app", "feishu_webhook"}:
+        raise HTTPException(status_code=400, detail="report schedule requires Feishu destination")
+
+
+def _report_preview_read(preview) -> ReportPreviewRead:
+    return ReportPreviewRead(
+        schedule_id=preview.schedule.id,
+        destination_id=preview.schedule.destination_id,
+        report_type=preview.schedule.report_type,
+        window_start=preview.window_start,
+        window_end=preview.window_end,
+        event_count=preview.event_count,
+        critical_high_count=preview.critical_high_count,
+        top_symbols=preview.top_symbols,
+        top_categories=preview.top_categories,
+        summary_zh=preview.summary_zh,
+        omitted_count=preview.omitted_count,
+        card=preview.card,
+        events=[
+            ReportEventPreview(
+                id=event.id,
+                title=event.title,
+                severity=event.severity,
+                category=event.category,
+                published_at=event.published_at,
+                first_seen_at=event.first_seen_at,
+                primary_url=event.primary_url,
+                symbols=event.symbols,
+                chains=event.chains,
+                ai_summary_zh=event_ai_summary(event),
+            )
+            for event in preview.events[:10]
+        ],
+    )
 
 
 def _ensure_test_event(session: Session, destination: NotificationDestination) -> Event:
