@@ -187,14 +187,14 @@ test("mock 管理端搜索、AI 与飞书汇报流程", async ({ page }) => {
   await page.goto("/login");
   await page.getByLabel("用户名").fill("admin");
   await page.getByLabel("密码").fill("password");
-  await page.getByRole("button", { name: "登录" }).click();
+  await page.getByRole("button", { name: /登\s*录/ }).click();
 
   await page.goto("/events");
   await page.getByPlaceholder("搜索标题、摘要、币种、链、来源、AI 标签或关键事实").fill("BTC");
   await expect(page.getByText("BTC 上币公告")).toBeVisible();
   await page.getByRole("button", { name: /保存筛选/ }).click();
   await page.getByLabel("筛选名称").fill("BTC 高风险");
-  await page.getByRole("button", { name: /^保存$/ }).click();
+  await page.getByRole("button", { name: /^保\s*存$/ }).click();
   await expect(page.getByText("已保存筛选")).toBeVisible();
   await page.getByRole("checkbox").nth(1).check();
   await page.getByRole("button", { name: /对选中事件进行 AI 整理/ }).click();
@@ -208,13 +208,13 @@ test("mock 管理端搜索、AI 与飞书汇报流程", async ({ page }) => {
   await page.getByRole("button", { name: /测试连接/ }).click();
 
   await page.goto("/feishu-groups");
-  await expect(page.getByText("Mock 飞书群")).toBeVisible();
+  await expect(page.getByRole("cell", { name: "Mock 飞书群" }).first()).toBeVisible();
   await page.getByRole("button", { name: /新建汇报规则/ }).click();
   await page.getByLabel("规则名称").fill("每小时 BTC 汇报");
   await page.getByRole("button", { name: /创建规则/ }).click();
   await page.getByRole("tab", { name: "汇报规则" }).click();
   await expect(page.getByText("每小时 BTC 汇报")).toBeVisible();
-  await page.getByRole("button", { name: /预览/ }).click();
+  await page.getByRole("button", { name: /预\s*览/ }).click();
   await expect(page.getByText("飞书汇报预览")).toBeVisible();
   await expect(page.getByText("Mock 汇报：过去一小时出现 1 条 BTC 高风险事件。")).toBeVisible();
   await page.getByRole("button", { name: "Close" }).click();
