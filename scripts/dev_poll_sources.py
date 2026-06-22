@@ -12,7 +12,7 @@ DEFAULT_SOURCES = ["binance_listing", "okx_listing", "blockbeats_newsflash"]
 
 def run_once(base_url: str, sources: list[str], timeout: float) -> list[dict[str, object]]:
     results: list[dict[str, object]] = []
-    with httpx.Client(base_url=base_url.rstrip("/"), timeout=timeout) as client:
+    with httpx.Client(base_url=base_url.rstrip("/"), timeout=timeout, trust_env=False) as client:
         for source in sources:
             started_at = datetime.now(UTC).isoformat()
             try:

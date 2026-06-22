@@ -35,6 +35,7 @@ import { useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
 import { normalizePaginated } from "../api/pagination";
 import { useAuth } from "../auth/AuthContext";
+import { QUERY_REFETCH_INTERVAL, QUERY_STALE_TIME, useDocumentVisible, visibleOnlyRefetchInterval } from "../queryConfig";
 import type {
   EventAiInsight,
   EventFacets,
@@ -150,6 +151,7 @@ const riskColor: Record<string, string> = {
 export function EventsPage() {
   const { csrf } = useAuth();
   const queryClient = useQueryClient();
+  const documentVisible = useDocumentVisible();
   const [searchParams, setSearchParams] = useSearchParams();
   const filters = useMemo(() => parseEventFilters(searchParams), [searchParams]);
   const [keyword, setKeyword] = useState(filters.q);
@@ -192,21 +194,29 @@ export function EventsPage() {
       return normalizePaginated(payload, filters.page, filters.page_size);
     },
     placeholderData: keepPreviousData,
-    staleTime: 15_000
+    staleTime: QUERY_STALE_TIME.eventsList,
+    refetchInterval: (query) =>
+      visibleOnlyRefetchInterval(
+        QUERY_REFETCH_INTERVAL.visibleEventsList,
+        documentVisible,
+        query.state.fetchFailureCount
+      ),
+    refetchIntervalInBackground: false
   });
 
   const facetsQuery = useQuery({
     queryKey: ["event-facets"],
     queryFn: () => api<EventFacets>("/api/admin/events/facets"),
+    enabled: filterOpen,
     retry: false,
-    staleTime: 300_000
+    staleTime: QUERY_STALE_TIME.eventFacets
   });
 
   const savedSearchesQuery = useQuery({
     queryKey: ["saved-searches"],
     queryFn: () => api<SavedSearch[]>("/api/admin/saved-searches"),
     retry: false,
-    staleTime: 60_000
+    staleTime: QUERY_STALE_TIME.savedSearches
   });
 
   const saveSearch = useMutation({
@@ -259,7 +269,7 @@ export function EventsPage() {
     queryFn: () => api<EventAiInsight>(`/api/admin/events/${selected?.id}/ai-insight`),
     enabled: Boolean(selected?.id),
     retry: false,
-    staleTime: 60_000
+    staleTime: QUERY_STALE_TIME.eventInsight
   });
 
   const data = eventsQuery.data ?? {
@@ -461,7 +471,7 @@ export function EventsPage() {
 
         <Table<EventRow>
           rowKey="id"
-          loading={eventsQuery.isLoading || eventsQuery.isFetching}
+          loading={eventsQuery.isLoading}
           dataSource={data.items}
           columns={columns}
           rowSelection={{

@@ -15,15 +15,18 @@ import {
   Typography,
   message
 } from "antd";
-import { ApiOutlined, DeleteOutlined, ReloadOutlined, RobotOutlined, SaveOutlined } from "@ant-design/icons";
+import { ApiOutlined, DeleteOutlined, ReloadOutlined, SaveOutlined } from "@ant-design/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo } from "react";
+import { aiApi, aiErrorMessage } from "../api/ai";
 import { api } from "../api/client";
 import { normalizePaginated } from "../api/pagination";
 import { useAuth } from "../auth/AuthContext";
 import type { AiModelInfo, AiModelsResponse, AiProviderConfig, AiRun, PaginatedResponse } from "../types/api";
 
 const DEEPSEEK_API_BASE = "https://api.deepseek.com";
+const CONFIG_QUERY_KEY = ["ai-provider", "deepseek"] as const;
+const MODELS_QUERY_KEY_PREFIX = ["ai-provider", "deepseek", "models"] as const;
 
 type AiConfigForm = {
   enabled: boolean;
@@ -68,15 +71,20 @@ export function AiSettingsPage() {
   const queryClient = useQueryClient();
 
   const configQuery = useQuery({
-    queryKey: ["ai-provider", "deepseek"],
-    queryFn: () => api<AiProviderConfig>("/api/admin/ai/providers/deepseek"),
+    queryKey: CONFIG_QUERY_KEY,
+    queryFn: () => aiApi<AiProviderConfig>("/api/admin/ai/providers/deepseek"),
     retry: false,
     staleTime: 30_000
   });
 
+  const modelCacheScope = modelCacheScopeFor(configQuery.data);
+  const modelsQueryKey = useMemo(
+    () => [...MODELS_QUERY_KEY_PREFIX, modelCacheScope] as const,
+    [modelCacheScope]
+  );
   const modelsQuery = useQuery({
-    queryKey: ["ai-provider", "deepseek", "models"],
-    queryFn: () => api<AiModelsResponse | string[]>("/api/admin/ai/providers/deepseek/models"),
+    queryKey: modelsQueryKey,
+    queryFn: () => aiApi<AiModelsResponse | string[]>("/api/admin/ai/providers/deepseek/models"),
     enabled: false,
     retry: false,
     staleTime: 600_000
@@ -93,34 +101,36 @@ export function AiSettingsPage() {
   });
 
   useEffect(() => {
-    const data = configQuery.data;
-    if (!data) {
-      return;
+    if (configQuery.data) {
+      form.setFieldsValue(formValuesFromConfig(configQuery.data));
     }
-    form.setFieldsValue({
-      enabled: data.enabled,
-      auto_process_enabled: data.auto_process_enabled,
-      model: data.model ?? undefined,
-      max_tokens: data.max_tokens ?? 1200,
-      timeout_seconds: data.timeout_seconds ?? 90,
-      max_concurrency: data.max_concurrency ?? 2,
-      daily_token_budget: data.daily_token_budget ?? 0,
-      daily_request_budget: data.daily_request_budget ?? 0,
-      auto_minimum_severity: data.auto_minimum_severity ?? "high",
-      thinking_enabled: data.thinking_enabled ?? false
-    });
   }, [configQuery.data, form]);
 
   const modelOptions = useMemo(() => normalizeModels(modelsQuery.data), [modelsQuery.data]);
-  const configured = Boolean(
-    configQuery.data?.api_key_configured ||
-      configQuery.data?.configured ||
-      configQuery.data?.api_key_masked
-  );
+  const configured = hasConfiguredKey(configQuery.data);
   const lastStatus = configQuery.data?.last_test_status || "not_tested";
+  const clearModelsCache = () => {
+    queryClient.removeQueries({ queryKey: MODELS_QUERY_KEY_PREFIX });
+  };
+
+  const handleFetchModels = async () => {
+    if (configQuery.isLoading) {
+      message.info("正在读取 DeepSeek 配置，请稍后再试");
+      return;
+    }
+    if (!configured) {
+      message.warning("请先保存 DeepSeek API Key，再获取模型列表");
+      return;
+    }
+    const result = await modelsQuery.refetch();
+    if (result.error) {
+      message.error(aiErrorMessage(result.error, "获取模型列表失败，请检查 DeepSeek Key 后重试"));
+    }
+  };
 
   const saveConfig = useMutation({
     mutationFn: (values: AiConfigForm) => {
+      const submittedApiKey = apiKeyForSubmit(values.api_key, configQuery.data);
       const body: Record<string, unknown> = {
         provider: "deepseek",
         enabled: Boolean(values.enabled),
@@ -135,48 +145,63 @@ export function AiSettingsPage() {
         auto_minimum_severity: values.auto_minimum_severity,
         thinking_enabled: Boolean(values.thinking_enabled)
       };
-      if (values.api_key?.trim()) {
-        body.api_key = values.api_key.trim();
+      if (submittedApiKey) {
+        body.api_key = submittedApiKey;
       }
-      return api<AiProviderConfig>("/api/admin/ai/providers/deepseek", {
+      return aiApi<AiProviderConfig>("/api/admin/ai/providers/deepseek", {
         method: "PUT",
         csrf,
         body: JSON.stringify(body)
       });
     },
-    onSuccess: () => {
+    onSuccess: (savedConfig, values) => {
       message.success("AI 智能整理配置已保存，API Key 不会明文回显");
+      queryClient.setQueryData(CONFIG_QUERY_KEY, savedConfig);
+      form.setFieldsValue(formValuesFromConfig(savedConfig));
       form.setFieldValue("api_key", undefined);
-      queryClient.invalidateQueries({ queryKey: ["ai-provider", "deepseek"] });
+      if (apiKeyForSubmit(values.api_key, configQuery.data)) {
+        clearModelsCache();
+      }
+    },
+    onError: (error) => {
+      message.error(aiErrorMessage(error, "保存 DeepSeek 配置失败，请检查配置后重试"));
     }
   });
 
   const deleteKey = useMutation({
     mutationFn: () =>
-      api("/api/admin/ai/providers/deepseek/key", {
+      aiApi<AiProviderConfig | undefined>("/api/admin/ai/providers/deepseek/key", {
         method: "DELETE",
         csrf
       }),
-    onSuccess: () => {
+    onSuccess: (deletedConfig) => {
       message.success("DeepSeek API Key 已删除");
+      const nextConfig = isAiProviderConfig(deletedConfig)
+        ? deletedConfig
+        : withoutApiKey(queryClient.getQueryData<AiProviderConfig>(CONFIG_QUERY_KEY));
+      queryClient.setQueryData(CONFIG_QUERY_KEY, nextConfig);
+      form.setFieldsValue(formValuesFromConfig(nextConfig));
       form.setFieldValue("api_key", undefined);
-      queryClient.invalidateQueries({ queryKey: ["ai-provider", "deepseek"] });
+      clearModelsCache();
+    },
+    onError: (error) => {
+      message.error(aiErrorMessage(error, "删除 DeepSeek API Key 失败，请稍后重试"));
     }
   });
 
   const testConnection = useMutation({
     mutationFn: () =>
-      api("/api/admin/ai/providers/deepseek/test", {
+      aiApi("/api/admin/ai/providers/deepseek/test", {
         method: "POST",
         csrf
       }),
     onSuccess: () => {
       message.success("测试连接已完成，结果已刷新");
-      queryClient.invalidateQueries({ queryKey: ["ai-provider", "deepseek"] });
+      queryClient.invalidateQueries({ queryKey: CONFIG_QUERY_KEY });
     },
-    onError: () => {
-      message.error("测试连接失败，请检查密钥、模型和预算设置");
-      queryClient.invalidateQueries({ queryKey: ["ai-provider", "deepseek"] });
+    onError: (error) => {
+      message.error(aiErrorMessage(error, "测试连接失败，请检查密钥、模型和预算设置"));
+      queryClient.invalidateQueries({ queryKey: CONFIG_QUERY_KEY });
     }
   });
 
@@ -193,7 +218,7 @@ export function AiSettingsPage() {
           type="warning"
           showIcon
           message="AI 后端接口暂不可用"
-          description="页面已保留配置入口，后端完成 /api/admin/ai/providers/deepseek 后即可联调。"
+          description={aiErrorMessage(configQuery.error, "页面已保留配置入口，后端接口恢复后即可联调。")}
         />
       ) : null}
 
@@ -210,7 +235,7 @@ export function AiSettingsPage() {
             <Form.Item label="启用自动整理" name="auto_process_enabled" valuePropName="checked" initialValue={false}>
               <Switch checkedChildren="自动" unCheckedChildren="手动" />
             </Form.Item>
-            <Form.Item label="是否启用 thinking" name="thinking_enabled" valuePropName="checked" initialValue={false}>
+            <Form.Item label="启用 thinking" name="thinking_enabled" valuePropName="checked" initialValue={false}>
               <Switch checkedChildren="启用" unCheckedChildren="关闭" />
             </Form.Item>
           </Space>
@@ -220,10 +245,7 @@ export function AiSettingsPage() {
           </Form.Item>
 
           <Form.Item label="API Key（只写）" name="api_key">
-            <Input.Password
-              autoComplete="new-password"
-              placeholder={configQuery.data?.api_key_masked || "sk-..."}
-            />
+            <Input.Password autoComplete="new-password" placeholder={configQuery.data?.api_key_masked || "sk-..."} />
           </Form.Item>
 
           <Space wrap align="end">
@@ -234,11 +256,7 @@ export function AiSettingsPage() {
                 options={modelOptions.length ? modelOptions : modelFallback(configQuery.data?.model)}
               />
             </Form.Item>
-            <Button
-              icon={<ReloadOutlined />}
-              onClick={() => void modelsQuery.refetch()}
-              loading={modelsQuery.isFetching}
-            >
+            <Button icon={<ReloadOutlined />} onClick={() => void handleFetchModels()} loading={modelsQuery.isFetching}>
               获取模型列表
             </Button>
           </Space>
@@ -284,7 +302,7 @@ export function AiSettingsPage() {
           <Descriptions.Item label="今日 Token 使用量">{configQuery.data?.tokens_today ?? 0}</Descriptions.Item>
           <Descriptions.Item label="今日请求次数">{configQuery.data?.requests_today ?? 0}</Descriptions.Item>
           <Descriptions.Item label="今日失败次数">{configQuery.data?.failures_today ?? 0}</Descriptions.Item>
-          <Descriptions.Item label="错误摘要">{configQuery.data?.last_error_sanitized || "无"}</Descriptions.Item>
+          <Descriptions.Item label="错误摘要">{formatStoredAiError(configQuery.data?.last_error_sanitized)}</Descriptions.Item>
         </Descriptions>
       </Card>
 
@@ -326,6 +344,99 @@ function normalizeModels(payload?: AiModelsResponse | string[]) {
 
 function modelFallback(model?: string | null) {
   return model ? [{ value: model, label: model }] : [];
+}
+
+function formValuesFromConfig(data: AiProviderConfig): Partial<AiConfigForm> {
+  return {
+    enabled: data.enabled,
+    auto_process_enabled: data.auto_process_enabled,
+    model: data.model ?? undefined,
+    max_tokens: data.max_tokens ?? 1200,
+    timeout_seconds: data.timeout_seconds ?? 90,
+    max_concurrency: data.max_concurrency ?? 2,
+    daily_token_budget: data.daily_token_budget ?? 0,
+    daily_request_budget: data.daily_request_budget ?? 0,
+    auto_minimum_severity: data.auto_minimum_severity ?? "high",
+    thinking_enabled: data.thinking_enabled ?? false
+  };
+}
+
+function apiKeyForSubmit(value?: string, config?: AiProviderConfig) {
+  const trimmed = value?.trim();
+  if (!trimmed || isMaskedApiKey(trimmed, config?.api_key_masked)) {
+    return undefined;
+  }
+  return trimmed;
+}
+
+function isMaskedApiKey(value: string, currentMasked?: string | null) {
+  const masked = currentMasked?.trim();
+  return (
+    value === "sk-..." ||
+    value.startsWith("sha256:") ||
+    value.includes("*") ||
+    value.includes("•") ||
+    Boolean(masked && value === masked)
+  );
+}
+
+function hasConfiguredKey(config?: AiProviderConfig) {
+  if (!config) {
+    return false;
+  }
+  if (typeof config.api_key_configured === "boolean") {
+    return config.api_key_configured;
+  }
+  return Boolean(config.configured || config.api_key_masked);
+}
+
+function modelCacheScopeFor(config?: AiProviderConfig) {
+  if (!hasConfiguredKey(config)) {
+    return "no-key";
+  }
+  if (config?.api_key_fingerprint) {
+    return `fingerprint:${config.api_key_fingerprint}`;
+  }
+  if (config?.api_key_masked) {
+    return `masked:${config.api_key_masked}`;
+  }
+  return "configured";
+}
+
+function withoutApiKey(config?: AiProviderConfig): AiProviderConfig {
+  return {
+    provider: "deepseek",
+    enabled: config?.enabled ?? false,
+    auto_process_enabled: config?.auto_process_enabled ?? false,
+    api_base: config?.api_base ?? DEEPSEEK_API_BASE,
+    configured: false,
+    api_key_configured: false,
+    api_key_masked: null,
+    api_key_fingerprint: null,
+    model: config?.model ?? null,
+    timeout_seconds: config?.timeout_seconds ?? 90,
+    max_concurrency: config?.max_concurrency ?? 2,
+    max_tokens: config?.max_tokens ?? 1200,
+    temperature: config?.temperature,
+    thinking_enabled: config?.thinking_enabled ?? false,
+    daily_token_budget: config?.daily_token_budget ?? 0,
+    daily_request_budget: config?.daily_request_budget ?? 0,
+    auto_minimum_severity: config?.auto_minimum_severity ?? "high",
+    last_tested_at: config?.last_tested_at ?? null,
+    last_test_status: config?.last_test_status ?? "not_tested",
+    last_error_sanitized: null,
+    tokens_today: config?.tokens_today ?? 0,
+    requests_today: config?.requests_today ?? 0,
+    failures_today: config?.failures_today ?? 0
+  };
+}
+
+function isAiProviderConfig(value: unknown): value is AiProviderConfig {
+  return Boolean(value && typeof value === "object" && (value as AiProviderConfig).provider === "deepseek");
+}
+
+function formatStoredAiError(value?: string | null) {
+  return value ? aiErrorMessage(new Error(value), value) : "无";
 }
 
 function formatTime(value?: string | null) {

@@ -54,6 +54,7 @@ from app.integrations.feishu.report_cards import event_ai_summary
 from app.integrations.feishu.reporting import FeishuReportService, next_run_at
 from app.integrations.feishu.token_provider import FeishuTokenProvider
 from app.publishers.feishu import publish_feishu_once
+from app.scheduler.planner import mark_source_queued
 from app.schemas.admin import (
     AdminAuthResponse,
     AdminLoginRequest,
@@ -108,7 +109,7 @@ from app.schemas.feishu_report import (
 from app.schemas.source import SourceRead
 from app.workers.celery_app import celery_app
 from app.workers.tasks_feishu_reports import run_feishu_report_schedule
-from app.workers.tasks_fetch import fetch_source
+from app.workers.tasks_fetch import enqueue_fetch_run
 from app.workers.tasks_publish import republish_event
 
 router = APIRouter(prefix="/api/admin", tags=["admin-api"])
@@ -551,10 +552,23 @@ def run_source(
     source = session.get(Source, source_id)
     if source is None:
         raise HTTPException(status_code=404, detail="source not found")
-    fetch_source.delay(source.key)
+    fetch_run = mark_source_queued(session, source, trace_id=str(uuid.uuid4()), force=True)
+    if fetch_run is None:
+        _audit(
+            session,
+            principal,
+            request,
+            "run",
+            "source",
+            str(source_id),
+            {"source_key": source.key, "queued": False},
+        )
+        session.commit()
+        return {"queued": False, "source_key": source.key}
     _audit(session, principal, request, "run", "source", str(source_id), {"source_key": source.key})
     session.commit()
-    return {"queued": True, "source_key": source.key}
+    queued = enqueue_fetch_run(source.key, fetch_run.id)
+    return {"queued": queued, "source_key": source.key}
 
 
 @router.get("/sources/{source_id}/runs")
@@ -573,6 +587,10 @@ def source_runs(
         {
             "id": row.id,
             "status": row.status,
+            "queued_at": row.queued_at,
+            "worker_started_at": row.worker_started_at,
+            "task_id": row.task_id,
+            "retry_after_until": row.retry_after_until,
             "started_at": row.started_at,
             "finished_at": row.finished_at,
             "http_status": row.http_status,
@@ -913,7 +931,6 @@ async def test_deepseek_connection(
     try:
         result = await service.test_connection("deepseek")
     except Exception as exc:
-        session.commit()
         _audit(
             session,
             principal,
@@ -923,6 +940,7 @@ async def test_deepseek_connection(
             "ai-deepseek-config",
             {"status": "failed"},
         )
+        session.commit()
         return AITestResult(status="failed", error=sanitize_error(exc))
     _audit(
         session,

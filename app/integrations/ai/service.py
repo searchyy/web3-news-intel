@@ -12,7 +12,12 @@ from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.config import settings
-from app.core.field_encryption import FieldEncryptor, fingerprint_secret, mask_fingerprint
+from app.core.field_encryption import (
+    FieldEncryptionError,
+    FieldEncryptor,
+    fingerprint_secret,
+    mask_fingerprint,
+)
 from app.core.time import utc_now
 from app.db.models import (
     AIPromptTemplate,
@@ -52,6 +57,12 @@ from app.integrations.ai.settings import (
 )
 
 MASKED_KEY_PREFIXES = ("****", "sha256:")
+MISSING_FIELD_ENCRYPTION_KEY_MESSAGE = (
+    "缺少 FIELD_ENCRYPTION_KEY，无法加密保存或读取 DeepSeek API Key，请先配置后端加密密钥。"
+)
+INVALID_FIELD_ENCRYPTION_KEY_MESSAGE = (
+    "FIELD_ENCRYPTION_KEY 配置无效，无法加密保存或读取 DeepSeek API Key。"
+)
 SECRET_KEY_MARKERS = (
     "secret",
     "token",
@@ -143,12 +154,11 @@ class AIService:
                 continue
             value = _sanitize_metadata(values[field]) if field == "config" else values[field]
             setattr(row, field, value)
-        api_key = values.get("api_key")
-        if api_key and not str(api_key).startswith(MASKED_KEY_PREFIXES):
+        api_key = _plaintext_api_key_update(values.get("api_key"))
+        if api_key is not None:
             encryptor = _field_encryptor()
-            plaintext = str(api_key)
-            row.api_key_ciphertext = encryptor.encrypt(plaintext)
-            row.api_key_fingerprint = fingerprint_secret(plaintext)
+            row.api_key_ciphertext = encryptor.encrypt(api_key)
+            row.api_key_fingerprint = fingerprint_secret(api_key)
         self.session.flush()
         return row
 
@@ -483,9 +493,47 @@ def build_repair_messages(
 
 def validate_ai_output(content: str) -> AIInsightOutput:
     try:
-        return AIInsightOutput.model_validate(parse_json_object(content))
+        return AIInsightOutput.model_validate(_coerce_ai_output_payload(parse_json_object(content)))
     except Exception as exc:
         raise AIJSONValidationError("AI JSON output validation failed") from exc
+
+
+def _coerce_ai_output_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    coerced = dict(payload)
+    for field, text_key in (
+        ("key_facts", "text"),
+        ("entities", "name"),
+        ("facts", "text"),
+        ("inferences", "text"),
+    ):
+        if field in coerced:
+            coerced[field] = _coerce_object_list(coerced[field], text_key=text_key)
+    for field in ("symbols", "chains", "source_event_ids", "source_urls"):
+        if field in coerced:
+            coerced[field] = _coerce_string_list(coerced[field])
+    return coerced
+
+
+def _coerce_object_list(value: Any, *, text_key: str) -> list[dict[str, Any]]:
+    if value is None:
+        return []
+    items = value if isinstance(value, list) else [value]
+    normalized: list[dict[str, Any]] = []
+    for item in items:
+        if isinstance(item, dict):
+            normalized.append(item)
+            continue
+        text = str(item).strip()
+        if text:
+            normalized.append({text_key: text})
+    return normalized
+
+
+def _coerce_string_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+    items = value if isinstance(value, list) else [value]
+    return [text for item in items if (text := str(item).strip())]
 
 
 def normalize_output_sources(
@@ -554,6 +602,7 @@ def provider_config_to_public_dict(
         "api_base": row.api_base,
         "api_key_configured": bool(row.api_key_ciphertext),
         "api_key_masked": mask_fingerprint(row.api_key_fingerprint),
+        "api_key_fingerprint": _public_key_fingerprint(row.api_key_fingerprint),
         "model": row.model,
         "timeout_seconds": row.timeout_seconds,
         "max_concurrency": row.max_concurrency,
@@ -606,8 +655,30 @@ def apply_output(row: EventAIInsight, output: AIInsightOutput) -> None:
 
 def _field_encryptor() -> FieldEncryptor:
     if not settings.field_encryption_key:
-        raise AIConfigurationError("FIELD_ENCRYPTION_KEY is required for AI secrets")
-    return FieldEncryptor(settings.field_encryption_key)
+        raise AIConfigurationError(MISSING_FIELD_ENCRYPTION_KEY_MESSAGE)
+    try:
+        return FieldEncryptor(settings.field_encryption_key)
+    except FieldEncryptionError as exc:
+        raise AIConfigurationError(INVALID_FIELD_ENCRYPTION_KEY_MESSAGE) from exc
+
+
+def _plaintext_api_key_update(value: Any) -> str | None:
+    if value is None:
+        return None
+    plaintext = str(value).strip()
+    if not plaintext:
+        return None
+    if plaintext.startswith(MASKED_KEY_PREFIXES[0]) or plaintext.lower().startswith(
+        MASKED_KEY_PREFIXES[1]
+    ):
+        return None
+    return plaintext
+
+
+def _public_key_fingerprint(fingerprint: str | None) -> str | None:
+    if not fingerprint:
+        return None
+    return f"sha256:{fingerprint[:16]}..."
 
 
 def _sanitize_metadata(value: Any, *, depth: int = 0) -> Any:

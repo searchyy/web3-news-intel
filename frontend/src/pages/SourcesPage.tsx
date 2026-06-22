@@ -2,6 +2,7 @@ import { Button, Space, Switch, Table, Typography } from "antd";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
+import { QUERY_STALE_TIME } from "../queryConfig";
 import type { SourceRow } from "../types/api";
 
 export function SourcesPage() {
@@ -9,7 +10,8 @@ export function SourcesPage() {
   const queryClient = useQueryClient();
   const { data = [], isLoading } = useQuery({
     queryKey: ["sources"],
-    queryFn: () => api<SourceRow[]>("/api/admin/sources")
+    queryFn: () => api<SourceRow[]>("/api/admin/sources"),
+    staleTime: QUERY_STALE_TIME.sources
   });
   const patch = useMutation({
     mutationFn: ({ id, enabled }: { id: number; enabled: boolean }) =>

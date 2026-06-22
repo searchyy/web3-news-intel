@@ -8,6 +8,7 @@ import feedparser
 from app.core.config import SourceConfig
 from app.core.time import parse_datetime
 from app.fetch.client import FetchClient
+from app.fetch.conditionals import conditional_request_headers, conditional_response_metadata
 from app.pipeline.normalize import canonicalize_url
 from app.schemas.normalized_item import NormalizedItem
 from app.schemas.raw_document import RawDocumentPayload
@@ -17,10 +18,17 @@ TAG_RE = re.compile(r"<[^>]+>")
 
 class RSSAdapter:
     async def fetch(
-        self, source: SourceConfig, fetch_client: FetchClient
+        self,
+        source: SourceConfig,
+        fetch_client: FetchClient,
+        *,
+        etag: str | None = None,
+        last_modified: str | None = None,
     ) -> list[RawDocumentPayload]:
+        headers = conditional_request_headers(etag=etag, last_modified=last_modified)
         response = await fetch_client.get_text(
             source.url,
+            headers=headers or None,
             allowed_content_types=(
                 "application/rss+xml",
                 "application/atom+xml",
@@ -39,7 +47,7 @@ class RSSAdapter:
                 body_hash=response.body_hash,
                 body=response.text,
                 fetched_at=response.fetched_at,
-                metadata={"adapter": "rss"},
+                metadata={"adapter": "rss", **conditional_response_metadata(response.headers)},
             )
         ]
 
