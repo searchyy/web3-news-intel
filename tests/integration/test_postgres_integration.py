@@ -48,7 +48,7 @@ def test_constraints_indexes_foreign_keys_and_migration_version(postgres_session
     bind = postgres_session.get_bind()
     inspector = inspect(bind)
     version = postgres_session.execute(text("select version_num from alembic_version")).scalar_one()
-    assert version == "0007_fetch_run_queue_observability"
+    assert version == "0007_fetch_run_queue_obs"
 
     extensions = {
         row[0]

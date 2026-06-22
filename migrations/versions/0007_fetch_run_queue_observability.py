@@ -1,6 +1,6 @@
 """fetch run queue observability
 
-Revision ID: 0007_fetch_run_queue_observability
+Revision ID: 0007_fetch_run_queue_obs
 Revises: 0006_source_catalog_metadata
 Create Date: 2026-06-22 00:00:00.000000
 """
@@ -10,7 +10,7 @@ from __future__ import annotations
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0007_fetch_run_queue_observability"
+revision = "0007_fetch_run_queue_obs"
 down_revision = "0006_source_catalog_metadata"
 branch_labels = None
 depends_on = None
