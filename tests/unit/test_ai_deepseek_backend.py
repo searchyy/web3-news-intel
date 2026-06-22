@@ -25,6 +25,7 @@ from app.integrations.ai.service import (
     build_event_input,
     provider_config_to_public_dict,
     sanitize_error,
+    validate_ai_output,
 )
 
 
@@ -145,6 +146,37 @@ def test_ai_service_requires_field_encryption_key_for_new_key(
     assert "缺少 FIELD_ENCRYPTION_KEY" in sanitized
     assert "sk-missing-secret" not in sanitized
     assert "Traceback" not in sanitized
+
+
+def test_validate_ai_output_accepts_common_model_string_arrays() -> None:
+    output = validate_ai_output(
+        json.dumps(
+            {
+                "headline_zh": "测试标题",
+                "summary_zh": "测试摘要",
+                "key_facts": ["事实一"],
+                "entities": ["Example"],
+                "symbols": ["BTC"],
+                "chains": ["ethereum"],
+                "event_type": "policy",
+                "importance_score": 55,
+                "risk_level": "medium",
+                "sentiment": "neutral",
+                "market_impact": "不确定",
+                "facts": ["可追溯事实"],
+                "inferences": ["推断内容"],
+                "confidence": 0.6,
+                "source_event_ids": [889],
+                "source_urls": ["https://example.com/a"],
+            }
+        )
+    )
+
+    assert output.key_facts == [{"text": "事实一"}]
+    assert output.entities == [{"name": "Example"}]
+    assert output.facts == [{"text": "可追溯事实"}]
+    assert output.inferences == [{"text": "推断内容"}]
+    assert output.source_event_ids == ["889"]
 
 
 def test_ai_service_ignores_empty_and_masked_key_updates(monkeypatch, db_session) -> None:

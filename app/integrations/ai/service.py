@@ -493,9 +493,47 @@ def build_repair_messages(
 
 def validate_ai_output(content: str) -> AIInsightOutput:
     try:
-        return AIInsightOutput.model_validate(parse_json_object(content))
+        return AIInsightOutput.model_validate(_coerce_ai_output_payload(parse_json_object(content)))
     except Exception as exc:
         raise AIJSONValidationError("AI JSON output validation failed") from exc
+
+
+def _coerce_ai_output_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    coerced = dict(payload)
+    for field, text_key in (
+        ("key_facts", "text"),
+        ("entities", "name"),
+        ("facts", "text"),
+        ("inferences", "text"),
+    ):
+        if field in coerced:
+            coerced[field] = _coerce_object_list(coerced[field], text_key=text_key)
+    for field in ("symbols", "chains", "source_event_ids", "source_urls"):
+        if field in coerced:
+            coerced[field] = _coerce_string_list(coerced[field])
+    return coerced
+
+
+def _coerce_object_list(value: Any, *, text_key: str) -> list[dict[str, Any]]:
+    if value is None:
+        return []
+    items = value if isinstance(value, list) else [value]
+    normalized: list[dict[str, Any]] = []
+    for item in items:
+        if isinstance(item, dict):
+            normalized.append(item)
+            continue
+        text = str(item).strip()
+        if text:
+            normalized.append({text_key: text})
+    return normalized
+
+
+def _coerce_string_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+    items = value if isinstance(value, list) else [value]
+    return [text for item in items if (text := str(item).strip())]
 
 
 def normalize_output_sources(
