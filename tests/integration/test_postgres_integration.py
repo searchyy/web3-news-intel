@@ -48,7 +48,7 @@ def test_constraints_indexes_foreign_keys_and_migration_version(postgres_session
     bind = postgres_session.get_bind()
     inspector = inspect(bind)
     version = postgres_session.execute(text("select version_num from alembic_version")).scalar_one()
-    assert version == "0006_source_catalog_metadata"
+    assert version == "0007_fetch_run_queue_observability"
 
     extensions = {
         row[0]
@@ -84,6 +84,11 @@ def test_constraints_indexes_foreign_keys_and_migration_version(postgres_session
     assert "ix_events_symbols_gin" in postgres_indexes
     assert "ix_events_chains_gin" in postgres_indexes
     assert "ix_events_entities_gin" in postgres_indexes
+
+    fetch_run_indexes = {index["name"] for index in inspector.get_indexes("fetch_runs")}
+    assert "ix_fetch_runs_source_status_started" in fetch_run_indexes
+    assert "ix_fetch_runs_task_id" in fetch_run_indexes
+    assert "uq_fetch_runs_active_source" in fetch_run_indexes
 
     event_source_fks = {
         tuple(foreign_key["constrained_columns"])

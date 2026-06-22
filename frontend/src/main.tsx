@@ -5,17 +5,10 @@ import { ConfigProvider } from "antd";
 import zhCN from "antd/locale/zh_CN";
 import { BrowserRouter } from "react-router-dom";
 import { App } from "./routes/App";
+import { queryClientConfig } from "./queryConfig";
 import "./styles.css";
 
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      staleTime: 30000,
-      refetchOnWindowFocus: false,
-      retry: 1
-    }
-  }
-});
+const queryClient = new QueryClient(queryClientConfig);
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>

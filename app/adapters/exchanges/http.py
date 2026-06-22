@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from app.core.config import SourceConfig
 from app.fetch.client import FetchClient
+from app.fetch.conditionals import conditional_request_headers, conditional_response_metadata
 from app.parsers.exchanges.html_parser import parse_html_announcements
 from app.parsers.exchanges.json_parser import parse_json_announcements
 from app.parsers.exchanges.rss_parser import parse_rss_announcements
@@ -20,11 +21,7 @@ class ExchangeOfficialAdapter:
         last_modified: str | None = None,
         canary: bool = False,
     ) -> list[RawDocumentPayload]:
-        headers: dict[str, str] = {}
-        if etag:
-            headers["If-None-Match"] = etag
-        if last_modified:
-            headers["If-Modified-Since"] = last_modified
+        headers = conditional_request_headers(etag=etag, last_modified=last_modified)
         response = await fetch_client.get_text(
             source.url,
             headers=headers or None,
@@ -55,10 +52,9 @@ class ExchangeOfficialAdapter:
                 fetched_at=response.fetched_at,
                 metadata={
                     "adapter": "exchange_official",
-                    "etag": response.headers.get("etag"),
-                    "last_modified": response.headers.get("last-modified"),
                     "canary": canary,
                     "max_canary_items": 10,
+                    **conditional_response_metadata(response.headers),
                 },
             )
         ]

@@ -10,7 +10,12 @@ from app.schemas.raw_document import RawDocumentPayload
 
 class Adapter(Protocol):
     async def fetch(
-        self, source: SourceConfig, fetch_client: FetchClient
+        self,
+        source: SourceConfig,
+        fetch_client: FetchClient,
+        *,
+        etag: str | None = None,
+        last_modified: str | None = None,
     ) -> list[RawDocumentPayload]: ...
 
     async def parse(

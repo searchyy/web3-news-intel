@@ -115,6 +115,7 @@ export type AiProviderConfig = {
   configured?: boolean;
   api_key_configured?: boolean;
   api_key_masked?: string | null;
+  api_key_fingerprint?: string | null;
   model?: string | null;
   timeout_seconds?: number;
   max_concurrency?: number;

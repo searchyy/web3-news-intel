@@ -31,6 +31,7 @@ class AdminSessionStore:
     def __init__(self) -> None:
         self._memory: dict[str, tuple[float, dict[str, Any]]] = {}
         self._redis: redis.Redis | None = None
+        self._redis_unavailable_until = 0.0
 
     def create(self, subject: str) -> tuple[str, str]:
         session_id = secrets.token_urlsafe(32)
@@ -43,8 +44,12 @@ class AdminSessionStore:
         key = self._key(session_id)
         client = self._client()
         if client:
-            raw = client.get(key)
-            return json.loads(raw) if raw else None
+            try:
+                raw = client.get(key)
+            except redis.RedisError as exc:
+                self._handle_redis_failure(exc)
+            else:
+                return json.loads(raw) if raw else None
         item = self._memory.get(key)
         if item is None:
             return None
@@ -58,7 +63,10 @@ class AdminSessionStore:
         key = self._key(session_id)
         client = self._client()
         if client:
-            client.delete(key)
+            try:
+                client.delete(key)
+            except redis.RedisError as exc:
+                self._handle_redis_failure(exc)
         self._memory.pop(key, None)
 
     def _set(self, session_id: str, data: dict[str, Any]) -> None:
@@ -66,25 +74,45 @@ class AdminSessionStore:
         ttl = settings.admin_session_ttl_seconds
         client = self._client()
         if client:
-            client.setex(key, ttl, json.dumps(data, separators=(",", ":")))
-            return
+            try:
+                client.setex(key, ttl, json.dumps(data, separators=(",", ":")))
+                return
+            except redis.RedisError as exc:
+                self._handle_redis_failure(exc)
         self._memory[key] = (time.time() + ttl, data)
 
     def _client(self) -> redis.Redis | None:
         if self._redis is not None:
             return self._redis
+        if self._allows_memory_fallback() and self._redis_unavailable_until > time.time():
+            return None
         try:
-            client = redis.Redis.from_url(settings.redis_url, socket_connect_timeout=1)
+            timeout = 0.05 if self._allows_memory_fallback() else 1
+            client = redis.Redis.from_url(
+                settings.redis_url,
+                socket_connect_timeout=timeout,
+                socket_timeout=timeout,
+            )
             client.ping()
         except Exception as exc:
-            if settings.app_env.lower() == "production":
-                raise HTTPException(
-                    status_code=503,
-                    detail="admin session store unavailable",
-                ) from exc
+            self._handle_redis_failure(exc)
             return None
         self._redis = client
         return client
+
+    def _handle_redis_failure(self, exc: BaseException) -> None:
+        self._redis = None
+        if self._allows_memory_fallback():
+            self._redis_unavailable_until = time.time() + 30
+            return
+        raise HTTPException(
+            status_code=503,
+            detail="admin session store unavailable",
+        ) from exc
+
+    @staticmethod
+    def _allows_memory_fallback() -> bool:
+        return settings.app_env.lower() in {"local", "dev", "development", "test", "testing"}
 
     @staticmethod
     def _key(session_id: str) -> str:

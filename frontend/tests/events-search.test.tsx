@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ConfigProvider } from "antd";
 import { MemoryRouter } from "react-router-dom";
@@ -21,12 +21,12 @@ function renderPage() {
   );
 }
 
-describe("事件搜索页面", () => {
+describe("events search page", () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
-  it("使用 300ms debounce 将中文搜索条件同步到服务端查询", async () => {
+  it("debounces search, avoids duplicate params, and defers facets", async () => {
     const requests: string[] = [];
     vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
       const url = String(input);
@@ -35,7 +35,7 @@ describe("事件搜索页面", () => {
         return Promise.resolve(json({ authenticated: true, username: "admin", csrf_token: "csrf" }));
       }
       if (url.includes("/api/admin/events/facets")) {
-        return Promise.resolve(json({ source_groups: [{ value: "exchange_official", label: "交易所官方", count: 2 }] }));
+        return Promise.resolve(json({ source_groups: [{ value: "exchange_official", label: "Official", count: 2 }] }));
       }
       if (url.includes("/api/admin/saved-searches")) {
         return Promise.resolve(json([]));
@@ -46,8 +46,8 @@ describe("事件搜索页面", () => {
             items: [
               {
                 id: 1,
-                title: "BTC 上币公告",
-                display_title: "BTC 上币公告",
+                title: "BTC listing",
+                display_title: "BTC listing",
                 category: "listing",
                 severity: "high",
                 status: "new",
@@ -68,16 +68,25 @@ describe("事件搜索页面", () => {
       return Promise.resolve(json({}));
     });
 
-    renderPage();
-    expect(await screen.findByText("BTC 上币公告")).toBeInTheDocument();
-    await userEvent.type(screen.getByPlaceholderText("搜索标题、摘要、币种、链、来源、AI 标签或关键事实"), "BTC");
+    const { container } = renderPage();
+
+    await waitFor(() => {
+      expect(requests.filter((url) => url.includes("/api/admin/events?"))).toHaveLength(1);
+      expect(requests.filter((url) => url.includes("/api/admin/saved-searches"))).toHaveLength(1);
+    });
+    expect(requests.filter((url) => url.includes("/api/admin/events/facets"))).toHaveLength(0);
+
+    const searchInput = container.querySelector<HTMLInputElement>(".event-search-input input");
+    expect(searchInput).not.toBeNull();
+    await userEvent.type(searchInput!, "BTC");
 
     await waitFor(
       () => {
-        expect(requests.some((url) => url.includes("/api/admin/events?") && url.includes("q=BTC"))).toBe(true);
+        expect(requests.filter((url) => url.includes("/api/admin/events?") && url.includes("q=BTC"))).toHaveLength(1);
       },
       { timeout: 1200 }
     );
+    expect(requests.filter((url) => url.includes("/api/admin/events/facets"))).toHaveLength(0);
   });
 });
 

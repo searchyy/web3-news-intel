@@ -17,6 +17,7 @@ from sqlalchemy import (
     UniqueConstraint,
     Uuid,
     func,
+    text,
 )
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -89,10 +90,25 @@ class Source(Base):
 
 class FetchRun(Base):
     __tablename__ = "fetch_runs"
+    __table_args__ = (
+        Index("ix_fetch_runs_source_status_started", "source_id", "status", "started_at"),
+        Index("ix_fetch_runs_task_id", "task_id"),
+        Index(
+            "uq_fetch_runs_active_source",
+            "source_id",
+            unique=True,
+            postgresql_where=text("status IN ('queued', 'running')"),
+            sqlite_where=text("status IN ('queued', 'running')"),
+        ),
+    )
 
     id: Mapped[int] = mapped_column(BigIntPk, primary_key=True, autoincrement=True)
     source_id: Mapped[int] = mapped_column(ForeignKey("sources.id"), nullable=False, index=True)
     status: Mapped[str] = mapped_column(Text, nullable=False, index=True)
+    queued_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    worker_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    task_id: Mapped[str | None] = mapped_column(Text)
+    retry_after_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     started_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

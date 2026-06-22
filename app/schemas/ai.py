@@ -14,6 +14,7 @@ class AIProviderConfigRead(BaseModel):
     api_base: str
     api_key_configured: bool
     api_key_masked: str | None = None
+    api_key_fingerprint: str | None = None
     model: str | None = None
     timeout_seconds: int
     max_concurrency: int

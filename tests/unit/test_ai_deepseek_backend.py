@@ -13,12 +13,19 @@ from app.db.models import Event
 from app.integrations.ai.base import AIMessage
 from app.integrations.ai.deepseek.client import DeepSeekClient
 from app.integrations.ai.deepseek.errors import (
+    AIAuthenticationError,
     AIBudgetExceededError,
     AIRateLimitedError,
     AITimeoutError,
     AITransientError,
 )
-from app.integrations.ai.service import AIService, build_event_input, provider_config_to_public_dict
+from app.integrations.ai.service import (
+    AIConfigurationError,
+    AIService,
+    build_event_input,
+    provider_config_to_public_dict,
+    sanitize_error,
+)
 
 
 @pytest.mark.asyncio
@@ -124,6 +131,121 @@ async def test_deepseek_client_maps_5xx_and_timeout_to_retryable_errors() -> Non
     assert timeout_exc.value.retryable is True
 
 
+def test_ai_service_requires_field_encryption_key_for_new_key(
+    monkeypatch,
+    db_session,
+) -> None:
+    monkeypatch.setattr(settings, "field_encryption_key", None)
+    service = AIService(db_session)
+
+    with pytest.raises(AIConfigurationError) as exc_info:
+        service.save_provider_config({"api_key": "sk-missing-secret", "model": "deepseek-chat"})
+
+    sanitized = sanitize_error(exc_info.value)
+    assert "缺少 FIELD_ENCRYPTION_KEY" in sanitized
+    assert "sk-missing-secret" not in sanitized
+    assert "Traceback" not in sanitized
+
+
+def test_ai_service_ignores_empty_and_masked_key_updates(monkeypatch, db_session) -> None:
+    monkeypatch.setattr(settings, "field_encryption_key", FieldEncryptor.generate_key())
+    service = AIService(db_session)
+    config = service.save_provider_config(
+        {"api_key": "sk-original-secret", "model": "deepseek-chat"}
+    )
+    original_ciphertext = config.api_key_ciphertext
+    original_fingerprint = config.api_key_fingerprint
+    assert original_ciphertext
+    assert original_fingerprint
+
+    public = provider_config_to_public_dict(config, service.usage_today("deepseek"))
+    masked_updates = (
+        "",
+        "   ",
+        "****",
+        public["api_key_masked"],
+        public["api_key_fingerprint"],
+    )
+    for masked_value in masked_updates:
+        config = service.save_provider_config(
+            {"api_key": masked_value, "model": "deepseek-reasoner"}
+        )
+        assert config.api_key_ciphertext == original_ciphertext
+        assert config.api_key_fingerprint == original_fingerprint
+        assert config.model == "deepseek-reasoner"
+
+
+@pytest.mark.asyncio
+async def test_ai_service_lists_models_with_saved_database_key(monkeypatch, db_session) -> None:
+    monkeypatch.setattr(settings, "field_encryption_key", FieldEncryptor.generate_key())
+    seen: dict[str, Any] = {"paths": []}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["paths"].append(request.url.path)
+        seen["authorization"] = request.headers.get("authorization")
+        return httpx.Response(
+            200,
+            json={"data": [{"id": "deepseek-chat", "owned_by": "deepseek"}]},
+            request=request,
+        )
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    service = AIService(db_session, http_client=client)
+    service.save_provider_config({"api_key": "sk-db-saved", "model": "deepseek-chat"})
+
+    models = await service.list_models("deepseek")
+    await client.aclose()
+
+    assert models == [
+        {"id": "deepseek-chat", "owned_by": "deepseek", "metadata": {}}
+    ]
+    assert seen["paths"] == ["/models"]
+    assert seen["authorization"] == "Bearer sk-db-saved"
+
+
+@pytest.mark.asyncio
+async def test_ai_service_test_connection_persists_success_and_failure(
+    monkeypatch,
+    db_session,
+) -> None:
+    monkeypatch.setattr(settings, "field_encryption_key", FieldEncryptor.generate_key())
+
+    def success_handler(request: httpx.Request) -> httpx.Response:
+        assert request.headers.get("authorization") == "Bearer sk-connection"
+        return httpx.Response(
+            200,
+            json={"data": [{"id": "deepseek-chat", "owned_by": "deepseek"}]},
+            request=request,
+        )
+
+    success_client = httpx.AsyncClient(transport=httpx.MockTransport(success_handler))
+    service = AIService(db_session, http_client=success_client)
+    config = service.save_provider_config({"api_key": "sk-connection", "model": "deepseek-chat"})
+
+    result = await service.test_connection("deepseek")
+    await success_client.aclose()
+
+    assert result["status"] == "success"
+    assert result["model_count"] == 1
+    assert config.last_test_status == "success"
+    assert config.last_error_sanitized is None
+
+    def failure_handler(request: httpx.Request) -> httpx.Response:
+        assert request.headers.get("authorization") == "Bearer sk-connection"
+        return httpx.Response(401, request=request)
+
+    failure_client = httpx.AsyncClient(transport=httpx.MockTransport(failure_handler))
+    failing_service = AIService(db_session, http_client=failure_client)
+    with pytest.raises(AIAuthenticationError):
+        await failing_service.test_connection("deepseek")
+    await failure_client.aclose()
+
+    assert config.last_test_status == "failed"
+    assert config.last_error_sanitized
+    assert "ai_authentication_failed" in config.last_error_sanitized
+    assert "sk-connection" not in config.last_error_sanitized
+
+
 @pytest.mark.asyncio
 async def test_ai_service_encrypts_key_masks_output_and_repairs_invalid_json(
     monkeypatch,
@@ -188,6 +310,9 @@ async def test_ai_service_encrypts_key_masks_output_and_repairs_invalid_json(
     public = provider_config_to_public_dict(config, service.usage_today("deepseek"))
     assert public["api_key_configured"] is True
     assert public["api_key_masked"].startswith("sha256:")
+    assert public["api_key_fingerprint"] == f"sha256:{config.api_key_fingerprint[:16]}..."
+    assert "sk-unit" not in json.dumps(public, default=str)
+    assert config.api_key_fingerprint not in json.dumps(public, default=str)
 
     insight = await service.summarize_event(event.id)
     assert insight.summary_zh == "BTC 出现重要市场事件。"

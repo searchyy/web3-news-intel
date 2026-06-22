@@ -2,6 +2,7 @@ import { Card, Col, Row, Skeleton, Statistic, Typography } from "antd";
 import { useQuery } from "@tanstack/react-query";
 import { lazy, Suspense, useMemo } from "react";
 import { api } from "../api/client";
+import { QUERY_STALE_TIME } from "../queryConfig";
 import type { DashboardSummary } from "../types/api";
 
 const ReactECharts = lazy(() => import("echarts-for-react"));
@@ -10,7 +11,7 @@ export function DashboardPage() {
   const { data, isLoading } = useQuery({
     queryKey: ["dashboard-summary"],
     queryFn: () => api<DashboardSummary>("/api/admin/dashboard/summary"),
-    staleTime: 30_000
+    staleTime: QUERY_STALE_TIME.dashboardSummary
   });
   if (isLoading || !data) {
     return <Skeleton active />;
