@@ -311,6 +311,7 @@ class EventAIInsight(Base):
     confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     source_event_ids: Mapped[list[str]] = mapped_column(TextArray, nullable=False, default=list)
     source_urls: Mapped[list[str]] = mapped_column(TextArray, nullable=False, default=list)
+    input_quality: Mapped[str] = mapped_column(Text, nullable=False, default="title_only")
     prompt_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     completion_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     generated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -339,6 +340,15 @@ class AIRun(Base):
     retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     error_code: Mapped[str | None] = mapped_column(Text)
     error_sanitized: Mapped[str | None] = mapped_column(Text)
+    error_message_sanitized: Mapped[str | None] = mapped_column(Text)
+    event_ids: Mapped[list[int]] = mapped_column(JsonDocument, nullable=False, default=list)
+    queued_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    queue_wait_ms: Mapped[int | None] = mapped_column(Integer)
+    provider_latency_ms: Mapped[int | None] = mapped_column(Integer)
+    total_latency_ms: Mapped[int | None] = mapped_column(Integer)
+    task_id: Mapped[str | None] = mapped_column(Text, index=True)
+    worker_name: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now(), index=True
     )

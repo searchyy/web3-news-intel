@@ -32,6 +32,22 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tansta
 import { useEffect, useMemo, useState } from "react";
 import type { Key } from "react";
 import { useSearchParams } from "react-router-dom";
+import {
+  aiJobErrorMessage,
+  aiJobPollInterval,
+  aiJobStatusColor,
+  aiJobStatusText,
+  getAiJob,
+  inputQualityText,
+  isAiInsightResponse,
+  isTerminalAiJobStatus,
+  normalizeAiJobErrorMessage,
+  normalizeAiJobFromSubmitResponse,
+  normalizeAiJobStatus,
+  requestBatchAiSummary,
+  requestEventAiSummary,
+  shouldWarnInputQuality
+} from "../api/aiJobs";
 import { api } from "../api/client";
 import { normalizePaginated } from "../api/pagination";
 import { useAuth } from "../auth/AuthContext";
@@ -41,6 +57,8 @@ import type {
   EventFacets,
   EventRow,
   FacetOption,
+  AiJob,
+  AiJobStatus,
   PaginatedResponse,
   SavedSearch
 } from "../types/api";
@@ -76,6 +94,19 @@ type EventFilters = {
 };
 
 type AdvancedFilterForm = Omit<EventFilters, "q" | "page">;
+
+type ActiveAiJob = {
+  jobId: string;
+  eventIds: number[];
+  status: AiJobStatus;
+  createdAtMs: number;
+  inputQuality?: string | null;
+  queueWaitMs?: number | null;
+  providerLatencyMs?: number | null;
+  totalLatencyMs?: number | null;
+  retryCount?: number;
+  error?: string | null;
+};
 
 const severityOptions = [
   { value: "critical", label: "严重" },
@@ -159,6 +190,9 @@ export function EventsPage() {
   const [saveOpen, setSaveOpen] = useState(false);
   const [selected, setSelected] = useState<EventRow | null>(null);
   const [selectedRowKeys, setSelectedRowKeys] = useState<Key[]>([]);
+  const [activeAiJob, setActiveAiJob] = useState<ActiveAiJob | null>(null);
+  const [aiJobTimedOut, setAiJobTimedOut] = useState(false);
+  const [reportedTerminalJobId, setReportedTerminalJobId] = useState<string | null>(null);
   const [filterForm] = Form.useForm<AdvancedFilterForm>();
   const [saveForm] = Form.useForm<{ name: string }>();
 
@@ -238,30 +272,44 @@ export function EventsPage() {
   });
 
   const summarizeBatch = useMutation({
-    mutationFn: (eventIds: number[]) =>
-      api("/api/admin/events/ai-summary-batch", {
-        method: "POST",
-        csrf,
-        body: JSON.stringify({ event_ids: eventIds })
-      }),
-    onSuccess: () => {
-      message.success("已提交 AI 整理任务");
+    mutationFn: (eventIds: number[]) => requestBatchAiSummary(eventIds, csrf),
+    onSuccess: (result, eventIds) => {
       setSelectedRowKeys([]);
-      queryClient.invalidateQueries({ queryKey: ["events"] });
+      handleAiSubmitResult(result, eventIds, "已提交 AI 整理任务");
+    },
+    onError: (error) => {
+      message.error(aiJobErrorMessage(error));
     }
   });
 
   const summarizeSingle = useMutation({
-    mutationFn: (eventId: number) =>
-      api(`/api/admin/events/${eventId}/ai-summary`, {
-        method: "POST",
-        csrf
-      }),
-    onSuccess: (_, eventId) => {
-      message.success("已提交重新生成任务");
-      queryClient.invalidateQueries({ queryKey: ["event-ai-insight", eventId] });
-      queryClient.invalidateQueries({ queryKey: ["events"] });
+    mutationFn: (eventId: number) => requestEventAiSummary(eventId, csrf),
+    onSuccess: (result, eventId) => {
+      handleAiSubmitResult(result, [eventId], "已提交重新生成任务");
+    },
+    onError: (error) => {
+      message.error(aiJobErrorMessage(error));
     }
+  });
+
+  const aiJobQuery = useQuery({
+    queryKey: ["ai-job", activeAiJob?.jobId],
+    queryFn: () => getAiJob(activeAiJob!.jobId),
+    enabled: Boolean(
+      activeAiJob?.jobId &&
+        documentVisible &&
+        !aiJobTimedOut &&
+        !isTerminalAiJobStatus(activeAiJob.status)
+    ),
+    retry: false,
+    staleTime: 0,
+    refetchInterval: (query) =>
+      aiJobPollInterval(
+        activeAiJob?.createdAtMs,
+        query.state.data?.status ?? activeAiJob?.status,
+        documentVisible
+      ),
+    refetchIntervalInBackground: false
   });
 
   const insightQuery = useQuery({
@@ -271,6 +319,81 @@ export function EventsPage() {
     retry: false,
     staleTime: QUERY_STALE_TIME.eventInsight
   });
+
+  useEffect(() => {
+    if (!activeAiJob || isTerminalAiJobStatus(activeAiJob.status)) {
+      return undefined;
+    }
+    const remainingMs = Math.max(0, 90_000 - (Date.now() - activeAiJob.createdAtMs));
+    const timer = window.setTimeout(() => {
+      setAiJobTimedOut(true);
+      setActiveAiJob((current) =>
+        current?.jobId === activeAiJob.jobId
+          ? { ...current, status: "failed", error: "AI 任务超过 90 秒仍未完成，请检查 Worker 或稍后重试。" }
+          : current
+      );
+      message.error("AI 任务超过 90 秒仍未完成，请检查 Worker 或稍后重试。");
+    }, remainingMs);
+    return () => window.clearTimeout(timer);
+  }, [activeAiJob?.createdAtMs, activeAiJob?.jobId, activeAiJob?.status]);
+
+  useEffect(() => {
+    if (!activeAiJob || !aiJobQuery.error || reportedTerminalJobId === activeAiJob.jobId) {
+      return;
+    }
+    const errorMessage = aiJobErrorMessage(aiJobQuery.error);
+    setReportedTerminalJobId(activeAiJob.jobId);
+    setActiveAiJob((current) =>
+      current?.jobId === activeAiJob.jobId ? { ...current, status: "failed", error: errorMessage } : current
+    );
+    message.error(errorMessage);
+  }, [activeAiJob, aiJobQuery.error, reportedTerminalJobId]);
+
+  useEffect(() => {
+    if (!activeAiJob || !aiJobQuery.data) {
+      return;
+    }
+
+    const job = aiJobQuery.data;
+    const status = normalizeAiJobStatus(job.status);
+    const eventIds = normalizeJobEventIds(job, activeAiJob.eventIds);
+    const sanitizedError = normalizeAiJobErrorMessage(job.error_message_sanitized ?? job.error_sanitized);
+    setActiveAiJob((current) =>
+      current?.jobId === activeAiJob.jobId
+        ? {
+            ...current,
+            status,
+            eventIds,
+            inputQuality: job.input_quality ?? current.inputQuality,
+            queueWaitMs: job.queue_wait_ms ?? current.queueWaitMs,
+            providerLatencyMs: job.provider_latency_ms ?? current.providerLatencyMs,
+            totalLatencyMs: job.total_latency_ms ?? current.totalLatencyMs,
+            retryCount: job.retry_count ?? current.retryCount,
+            error: sanitizedError ?? current.error
+          }
+        : current
+    );
+
+    if (!isTerminalAiJobStatus(status) || reportedTerminalJobId === activeAiJob.jobId) {
+      return;
+    }
+
+    setReportedTerminalJobId(activeAiJob.jobId);
+    if (status === "succeeded") {
+      if (job.insight?.event_id) {
+        queryClient.setQueryData(["event-ai-insight", job.insight.event_id], job.insight);
+      }
+      eventIds.forEach((eventId) => {
+        queryClient.invalidateQueries({ queryKey: ["event-ai-insight", eventId], exact: true });
+      });
+      queryClient.invalidateQueries({ queryKey: ["ai-job", activeAiJob.jobId], exact: true });
+      queryClient.invalidateQueries({ queryKey: ["events", filters], exact: true });
+      message.success("AI 整理已完成");
+      return;
+    }
+
+    message.error(sanitizedError ?? "AI 整理任务失败，请检查 Worker 状态后重试。");
+  }, [activeAiJob, aiJobQuery.data, filters, queryClient, reportedTerminalJobId]);
 
   const data = eventsQuery.data ?? {
     items: [],
@@ -328,21 +451,29 @@ export function EventsPage() {
         title: "AI",
         dataIndex: "ai_summary_status",
         width: 170,
-        render: (_, row) => (
-          <Space direction="vertical" size={2}>
-            {row.has_ai_summary || row.ai_summary_status === "completed" ? (
-              <Tag color="green">已整理</Tag>
-            ) : (
-              <Tag>未整理</Tag>
-            )}
-            {typeof row.ai_importance_score === "number" ? (
-              <Typography.Text type="secondary">重要度 {row.ai_importance_score}</Typography.Text>
-            ) : null}
-            {row.ai_risk_level ? (
-              <Tag color={riskColor[row.ai_risk_level] ?? "default"}>{riskText[row.ai_risk_level] ?? row.ai_risk_level}</Tag>
-            ) : null}
-          </Space>
-        )
+        render: (_, row) => {
+          const rowJob = activeAiJob?.eventIds.includes(row.id) ? activeAiJob : undefined;
+          return (
+            <Space direction="vertical" size={2}>
+              {rowJob ? (
+                <Tag color={aiJobStatusColor(rowJob.status)}>{aiJobStatusText(rowJob.status)}</Tag>
+              ) : row.has_ai_summary || row.ai_summary_status === "completed" ? (
+                <Tag color="green">已整理</Tag>
+              ) : (
+                <Tag>未整理</Tag>
+              )}
+              {shouldWarnInputQuality(rowJob?.inputQuality) ? (
+                <Typography.Text type="warning">输入信息较少</Typography.Text>
+              ) : null}
+              {typeof row.ai_importance_score === "number" ? (
+                <Typography.Text type="secondary">重要度 {row.ai_importance_score}</Typography.Text>
+              ) : null}
+              {row.ai_risk_level ? (
+                <Tag color={riskColor[row.ai_risk_level] ?? "default"}>{riskText[row.ai_risk_level] ?? row.ai_risk_level}</Tag>
+              ) : null}
+            </Space>
+          );
+        }
       },
       {
         title: "币种/链",
@@ -390,7 +521,7 @@ export function EventsPage() {
         )
       }
     ],
-    []
+    [activeAiJob]
   );
 
   return (
@@ -449,6 +580,8 @@ export function EventsPage() {
               对选中事件进行 AI 整理
             </Button>
           </Space>
+
+          {activeAiJob ? <AiJobStatusAlert job={activeAiJob} loading={aiJobQuery.isFetching} /> : null}
 
           {savedSearchesQuery.data?.length ? (
             <Space className="saved-search-row" wrap>
@@ -657,6 +790,7 @@ export function EventsPage() {
               loading={insightQuery.isLoading}
               error={insightQuery.isError}
               fallback={selected}
+              job={activeAiJob?.eventIds.includes(selected.id) ? activeAiJob : undefined}
             />
           </Space>
         ) : null}
@@ -673,18 +807,61 @@ export function EventsPage() {
     };
     setSearchParams(filtersToSearchParams(next), { replace: true });
   }
+
+  function handleAiSubmitResult(result: unknown, eventIds: number[], successText: string) {
+    const typedResult = result as Parameters<typeof normalizeAiJobFromSubmitResponse>[0];
+    if (isAiInsightResponse(typedResult)) {
+      queryClient.setQueryData(["event-ai-insight", typedResult.event_id], typedResult);
+      queryClient.invalidateQueries({ queryKey: ["event-ai-insight", typedResult.event_id], exact: true });
+      queryClient.invalidateQueries({ queryKey: ["events", filters], exact: true });
+      message.success("AI 摘要已生成");
+      return;
+    }
+
+    const job = normalizeAiJobFromSubmitResponse(typedResult);
+    if (!job?.job_id) {
+      message.warning("AI 任务已提交，但后端未返回 job_id，无法追踪任务状态。");
+      return;
+    }
+
+    const nextEventIds = normalizeJobEventIds(job, eventIds);
+    setAiJobTimedOut(false);
+    setReportedTerminalJobId(null);
+    setActiveAiJob({
+      jobId: job.job_id,
+      eventIds: nextEventIds,
+      status: normalizeAiJobStatus(job.status),
+      createdAtMs: Date.now(),
+      inputQuality: job.input_quality,
+      queueWaitMs: job.queue_wait_ms,
+      providerLatencyMs: job.provider_latency_ms,
+      totalLatencyMs: job.total_latency_ms,
+      retryCount: job.retry_count,
+      error: normalizeAiJobErrorMessage(job.error_message_sanitized ?? job.error_sanitized)
+    });
+    queryClient.setQueryData(["ai-job", job.job_id], job);
+    nextEventIds.forEach((eventId) => {
+      queryClient.invalidateQueries({ queryKey: ["event-ai-insight", eventId], exact: true });
+    });
+    message.success(successText);
+    if (shouldWarnInputQuality(job.input_quality)) {
+      message.warning("输入信息较少，AI 结果可能不完整。");
+    }
+  }
 }
 
 function AiInsightPanel({
   insight,
   loading,
   error,
-  fallback
+  fallback,
+  job
 }: {
   insight?: EventAiInsight;
   loading: boolean;
   error: boolean;
   fallback: EventRow;
+  job?: ActiveAiJob;
 }) {
   if (loading) {
     return <Card title="AI 摘要" loading />;
@@ -708,6 +885,10 @@ function AiInsightPanel({
 
   return (
     <Card title="AI 摘要">
+      {job ? <AiJobStatusAlert job={job} compact /> : null}
+      {shouldWarnInputQuality(job?.inputQuality ?? insight?.input_quality) ? (
+        <Alert type="warning" showIcon message="输入信息较少，AI 结果可能不完整。" />
+      ) : null}
       {summary || headline ? (
         <Space direction="vertical" size={12} className="page-stack">
           {headline ? <Typography.Title level={5}>{headline}</Typography.Title> : null}
@@ -732,6 +913,46 @@ function AiInsightPanel({
         <Empty description="暂无 AI 摘要" />
       )}
     </Card>
+  );
+}
+
+function AiJobStatusAlert({
+  job,
+  loading = false,
+  compact = false
+}: {
+  job: ActiveAiJob;
+  loading?: boolean;
+  compact?: boolean;
+}) {
+  const status = normalizeAiJobStatus(job.status);
+  const terminal = isTerminalAiJobStatus(status);
+  const qualityText = inputQualityText(job.inputQuality);
+  const error = normalizeAiJobErrorMessage(job.error);
+  const descriptionItems = [
+    qualityText ? `输入质量：${qualityText}` : undefined,
+    typeof job.queueWaitMs === "number" ? `排队 ${job.queueWaitMs}ms` : undefined,
+    typeof job.providerLatencyMs === "number" ? `模型 ${job.providerLatencyMs}ms` : undefined,
+    typeof job.totalLatencyMs === "number" ? `总耗时 ${job.totalLatencyMs}ms` : undefined,
+    typeof job.retryCount === "number" && job.retryCount > 0 ? `重试 ${job.retryCount} 次` : undefined,
+    error && status === "failed" ? error : undefined
+  ].filter(Boolean);
+
+  return (
+    <Alert
+      className={compact ? undefined : "ai-job-status-alert"}
+      type={status === "failed" ? "error" : status === "succeeded" ? "success" : "info"}
+      showIcon
+      message={
+        <Space wrap>
+          <span>AI 任务</span>
+          <Tag color={aiJobStatusColor(status)}>{aiJobStatusText(status)}</Tag>
+          {loading && !terminal ? <Tag color="processing">正在刷新</Tag> : null}
+          <Typography.Text type="secondary">Job {job.jobId}</Typography.Text>
+        </Space>
+      }
+      description={descriptionItems.length ? descriptionItems.join(" · ") : undefined}
+    />
   );
 }
 
@@ -972,6 +1193,11 @@ function stringifyInsightItem(item: unknown) {
     return JSON.stringify(record);
   }
   return "不确定";
+}
+
+function normalizeJobEventIds(job: AiJob, fallback: number[]) {
+  const eventIds = job.event_ids?.length ? job.event_ids : typeof job.event_id === "number" ? [job.event_id] : fallback;
+  return Array.from(new Set(eventIds.filter((eventId) => Number.isFinite(eventId))));
 }
 
 function sumNumbers(...values: Array<number | undefined>) {

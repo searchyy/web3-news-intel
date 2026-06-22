@@ -60,6 +60,8 @@ describe("frontend performance constraints", () => {
     expect(eventsSource).toContain("refetchInterval: (query)");
     expect(eventsSource).toContain("query.state.fetchFailureCount");
     expect(eventsSource).toContain("refetchIntervalInBackground: false");
+    expect(eventsSource).toContain("aiJobPollInterval(");
+    expect(eventsSource).toContain("!isTerminalAiJobStatus(activeAiJob.status)");
     expect(eventsSource).toContain("loading={eventsQuery.isLoading}");
     expect(eventsSource).toContain("enabled: filterOpen");
   });

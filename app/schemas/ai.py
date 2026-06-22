@@ -95,6 +95,64 @@ class AITaskStatus(BaseModel):
     result: Any = None
 
 
+class AIJobCreateResponse(BaseModel):
+    queued: bool
+    job_id: int
+    task_id: str | None = None
+    event_id: int | None = None
+    event_ids: list[int] = Field(default_factory=list)
+    status: Literal["queued"]
+    poll_url: str
+
+
+class AIJobRead(BaseModel):
+    job_id: int
+    status: Literal["queued", "started", "retrying", "succeeded", "failed", "cancelled"]
+    job_type: str
+    provider: str
+    model: str | None = None
+    event_id: int | None = None
+    event_ids: list[int] = Field(default_factory=list)
+    task_id: str | None = None
+    worker_name: str | None = None
+    retry_count: int = 0
+    queued_at: datetime
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    queue_wait_ms: int | None = None
+    provider_latency_ms: int | None = None
+    total_latency_ms: int | None = None
+    error_code: str | None = None
+    error_message_sanitized: str | None = None
+    input_quality: Literal["title_only", "summary", "excerpt", "multi_source"] | None = None
+    insight: dict[str, Any] | None = None
+    result: dict[str, Any] | None = None
+
+
+class AIJobRetryResponse(BaseModel):
+    queued: bool
+    job_id: int
+    task_id: str | None = None
+    status: Literal["queued"]
+    poll_url: str
+
+
+class AIJobCancelResponse(BaseModel):
+    cancelled: bool
+    job_id: int
+    status: Literal["cancelled"]
+
+
+class AIRuntimeStatus(BaseModel):
+    execution_mode: Literal["sync", "async"]
+    sync_allowed: bool
+    redis_available: bool
+    worker_available: bool
+    queue_name: str
+    status: Literal["ready", "degraded"]
+    error: str | None = None
+
+
 class AIRunRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -111,6 +169,15 @@ class AIRunRead(BaseModel):
     retry_count: int
     error_code: str | None
     error_sanitized: str | None
+    error_message_sanitized: str | None = None
+    event_ids: list[int] = Field(default_factory=list)
+    queued_at: datetime | None = None
+    started_at: datetime | None = None
+    queue_wait_ms: int | None = None
+    provider_latency_ms: int | None = None
+    total_latency_ms: int | None = None
+    task_id: str | None = None
+    worker_name: str | None = None
     created_at: datetime
     finished_at: datetime | None
 
@@ -153,6 +220,7 @@ class EventAIInsightRead(BaseModel):
     source_urls: list[str]
     prompt_tokens: int
     completion_tokens: int
+    input_quality: str = "title_only"
     generated_at: datetime | None
     status: str
     error_sanitized: str | None

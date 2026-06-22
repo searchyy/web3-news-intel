@@ -8,8 +8,8 @@ from datetime import UTC, datetime
 from typing import Any
 
 import httpx
-from sqlalchemy import case, func, select
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy import case, func, select, update
+from sqlalchemy.orm import Session, object_session, selectinload
 
 from app.core.config import settings
 from app.core.field_encryption import (
@@ -18,7 +18,7 @@ from app.core.field_encryption import (
     fingerprint_secret,
     mask_fingerprint,
 )
-from app.core.time import utc_now
+from app.core.time import ensure_utc, utc_now
 from app.db.models import (
     AIPromptTemplate,
     AIProviderConfig,
@@ -34,6 +34,7 @@ from app.integrations.ai.deepseek.errors import (
     AIProviderError,
     AITransientError,
 )
+from app.integrations.ai.input_builder import build_event_input as build_ai_event_input
 from app.integrations.ai.limits import ai_limit_controller
 from app.integrations.ai.prompts import (
     DEFAULT_OUTPUT_SCHEMA_VERSION,
@@ -44,6 +45,7 @@ from app.integrations.ai.prompts import (
     USER_PROMPT_TEMPLATE,
 )
 from app.integrations.ai.registry import registry
+from app.integrations.ai.runtime import AIRuntimeTimeoutError, get_ai_runtime_settings
 from app.integrations.ai.schemas import (
     AIEventInput,
     AIInsightOutput,
@@ -57,6 +59,7 @@ from app.integrations.ai.settings import (
 )
 
 MASKED_KEY_PREFIXES = ("****", "sha256:")
+ACTIVE_JOB_STATUSES = {"queued", "started", "retrying"}
 MISSING_FIELD_ENCRYPTION_KEY_MESSAGE = (
     "缺少 FIELD_ENCRYPTION_KEY，无法加密保存或读取 DeepSeek API Key，请先配置后端加密密钥。"
 )
@@ -80,6 +83,14 @@ SECRET_KEY_MARKERS = (
 
 class AIConfigurationError(AIProviderError):
     error_code = "ai_configuration_error"
+
+
+class AIJobCancelledError(AIProviderError):
+    error_code = "ai_job_cancelled"
+
+
+class AIJobStoppedError(AIProviderError):
+    error_code = "ai_job_stopped"
 
 
 class AIService:
@@ -207,7 +218,11 @@ class AIService:
         force: bool = False,
         auto: bool = False,
         job_type: str = "summarize_event",
+        run: AIRun | None = None,
+        worker_name: str | None = None,
     ) -> EventAIInsight:
+        started_perf = time.perf_counter()
+        started_at = utc_now()
         row = self.get_or_create_provider_config("deepseek")
         if not row.enabled:
             raise AIConfigurationError("AI is disabled")
@@ -225,6 +240,17 @@ class AIService:
         runtime = self._runtime_config(row, require_model=True)
         existing = self._find_existing(event.id, runtime, template.version, input_hash)
         if existing is not None and not force:
+            if run is not None:
+                _finish_ai_run(
+                    run,
+                    event_id=event.id,
+                    runtime_model=runtime.model,
+                    runtime_provider=row.provider,
+                    started_at=started_at,
+                    started_perf=started_perf,
+                    status=_success_status_for_run(run),
+                    worker_name=worker_name,
+                )
             return existing
 
         dedupe_key = _input_hash_lock_key(
@@ -239,18 +265,46 @@ class AIService:
         ):
             existing = self._find_existing(event.id, runtime, template.version, input_hash)
             if existing is not None and not force:
+                if run is not None:
+                    _finish_ai_run(
+                        run,
+                        event_id=event.id,
+                        runtime_model=runtime.model,
+                        runtime_provider=row.provider,
+                        started_at=started_at,
+                        started_perf=started_perf,
+                        status=_success_status_for_run(run),
+                        worker_name=worker_name,
+                    )
                 return existing
 
             usage = self._check_budget(row, auto=auto)
             _limit_controller.sync_daily_usage(row.provider, usage)
-            run = AIRun(
-                job_type=job_type,
-                provider=row.provider,
-                model=runtime.model,
-                event_count=1,
-                status="running",
-            )
-            self.session.add(run)
+            if run is None:
+                run = AIRun(
+                    job_type=job_type,
+                    provider=row.provider,
+                    model=runtime.model,
+                    event_count=1,
+                    event_ids=[event.id],
+                    status="started",
+                    queued_at=started_at,
+                    started_at=started_at,
+                    queue_wait_ms=0,
+                    worker_name=worker_name,
+                )
+                self.session.add(run)
+            else:
+                if not _claim_run_started(
+                    self.session,
+                    run,
+                    event_id=event.id,
+                    runtime_model=runtime.model,
+                    runtime_provider=row.provider,
+                    started_at=started_at,
+                    worker_name=worker_name,
+                ):
+                    _raise_if_run_stopped(run)
             self.session.flush()
             try:
                 with _limit_controller.reserve(
@@ -261,11 +315,20 @@ class AIService:
                     daily_token_budget=row.daily_token_budget,
                 ):
                     provider = self.provider_registry.create(runtime, client=self.http_client)
-                    output, prompt_tokens, completion_tokens, retries = await call_with_repair(
+                    (
+                        output,
+                        prompt_tokens,
+                        completion_tokens,
+                        retries,
+                        provider_latency_ms,
+                    ) = await call_with_repair(
                         provider,
                         event_input,
                         template,
                     )
+                self.session.refresh(run)
+                if run.status not in ACTIVE_JOB_STATUSES:
+                    _raise_if_run_stopped(run)
                 insight = self._save_insight(
                     event,
                     runtime=runtime,
@@ -274,12 +337,20 @@ class AIService:
                     output=normalize_output_sources(output, event_input),
                     prompt_tokens=prompt_tokens,
                     completion_tokens=completion_tokens,
+                    input_quality=event_input.input_quality,
                 )
-                run.status = "success"
-                run.prompt_tokens = prompt_tokens
-                run.completion_tokens = completion_tokens
-                run.retry_count = retries
-                run.finished_at = utc_now()
+                run_status = _success_status_for_run(run)
+                if not _claim_run_completion(
+                    self.session,
+                    run,
+                    status=run_status,
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                    retry_count=retries,
+                    provider_latency_ms=provider_latency_ms,
+                    started_perf=started_perf,
+                ):
+                    _raise_if_run_stopped(run)
                 _limit_controller.record_token_usage(
                     row.provider,
                     prompt_tokens + completion_tokens,
@@ -287,13 +358,13 @@ class AIService:
                 _limit_controller.record_success(row.provider)
                 self.session.flush()
                 return insight
+            except AIJobCancelledError:
+                raise
+            except AIJobStoppedError:
+                raise
             except Exception as exc:
-                run.status = (
-                    "budget_rejected" if isinstance(exc, AIBudgetExceededError) else "failed"
-                )
-                run.error_code = getattr(exc, "error_code", "ai_task_failed")
-                run.error_sanitized = sanitize_error(exc)
-                run.finished_at = utc_now()
+                if not _claim_run_failure(self.session, run, exc, started_perf=started_perf):
+                    _raise_if_run_stopped(run)
                 if isinstance(exc, AITransientError):
                     _limit_controller.record_failure(row.provider)
                 self.session.flush()
@@ -330,6 +401,9 @@ class AIService:
             .where(EventAIInsight.event_id == event_id)
             .order_by(EventAIInsight.generated_at.desc().nullslast(), EventAIInsight.id.desc())
         )
+
+    def mark_stale_runs(self, *, limit: int = 200) -> int:
+        return mark_stale_ai_runs(self.session, limit=limit)
 
     def ensure_default_prompt_template(self) -> AIPromptTemplate:
         row = self.session.scalar(
@@ -402,6 +476,7 @@ class AIService:
         output: AIInsightOutput,
         prompt_tokens: int,
         completion_tokens: int,
+        input_quality: str,
     ) -> EventAIInsight:
         row = self._find_existing(event.id, runtime, prompt_version, input_hash)
         if row is None:
@@ -416,6 +491,7 @@ class AIService:
         apply_output(row, output)
         row.prompt_tokens = prompt_tokens
         row.completion_tokens = completion_tokens
+        row.input_quality = input_quality
         row.generated_at = utc_now()
         row.status = "success"
         row.error_sanitized = None
@@ -435,7 +511,10 @@ class AIService:
     def _event_or_none(self, event_id: int) -> Event | None:
         return self.session.scalar(
             select(Event)
-            .options(selectinload(Event.sources).selectinload(EventSource.source))
+            .options(
+                selectinload(Event.sources).selectinload(EventSource.source),
+                selectinload(Event.sources).selectinload(EventSource.raw_document),
+            )
             .where(Event.id == event_id)
         )
 
@@ -444,11 +523,11 @@ async def call_with_repair(
     provider: AIProvider,
     event_input: AIEventInput,
     template: AIPromptTemplate,
-) -> tuple[AIInsightOutput, int, int, int]:
+) -> tuple[AIInsightOutput, int, int, int, int]:
     first = await provider.chat_completion(build_messages(event_input, template))
     try:
         output = validate_ai_output(first.content)
-        return output, first.prompt_tokens, first.completion_tokens, 0
+        return output, first.prompt_tokens, first.completion_tokens, 0, first.latency_ms or 0
     except Exception:
         retry = await provider.chat_completion(
             build_repair_messages(event_input, template, first.content)
@@ -459,6 +538,7 @@ async def call_with_repair(
             first.prompt_tokens + retry.prompt_tokens,
             first.completion_tokens + retry.completion_tokens,
             1,
+            (first.latency_ms or 0) + (retry.latency_ms or 0),
         )
 
 
@@ -562,28 +642,103 @@ def normalize_output_sources(
 
 
 def build_event_input(event: Event) -> AIEventInput:
-    source_names: list[str] = []
-    urls: list[str] = []
-    for event_source in sorted(event.sources, key=lambda item: item.id or 0):
-        if event_source.source and event_source.source.name not in source_names:
-            source_names.append(event_source.source.name)
-        if event_source.url and event_source.url not in urls:
-            urls.append(event_source.url)
-    if event.primary_url and event.primary_url not in urls:
-        urls.append(event.primary_url)
-    return AIEventInput(
-        event_id=event.id,
-        title=_truncate(event.title),
-        summary=_truncate(event.summary) if event.summary else None,
-        source_names=source_names,
-        published_at=event.published_at.isoformat() if event.published_at else None,
-        original_urls=urls[:10],
-        category=event.category,
-        severity=event.severity,
-        symbols=list(event.symbols or [])[:20],
-        chains=list(event.chains or [])[:20],
-        metadata=_sanitize_metadata(event.metadata_ or {}),
+    return build_ai_event_input(event)
+
+
+def mark_stale_ai_runs(session: Session, *, limit: int = 200) -> int:
+    stmt = (
+        select(AIRun)
+        .where(AIRun.status.in_(["queued", "started", "retrying"]))
+        .order_by(AIRun.queued_at.asc().nullslast(), AIRun.created_at.asc())
+        .limit(limit)
     )
+    changed = 0
+    for run in session.scalars(stmt):
+        if mark_stale_ai_run(run):
+            changed += 1
+    if changed:
+        session.flush()
+    return changed
+
+
+def mark_stale_ai_run(run: AIRun) -> bool:
+    if run.status not in {"queued", "started", "retrying"}:
+        return False
+    runtime_settings = get_ai_runtime_settings()
+    now = utc_now()
+    queued_at = ensure_utc(run.queued_at or run.created_at)
+    started_at = ensure_utc(run.started_at)
+    if run.status == "queued" and queued_at is not None:
+        age_seconds = (now - queued_at).total_seconds()
+        if age_seconds >= runtime_settings.job_timeout_seconds:
+            return _claim_run_stale_failed(
+                run,
+                "ai_job_timeout",
+                "AI 任务排队超时，请检查 Worker 状态后重试",
+                expected_status="queued",
+                require_unstarted=True,
+            )
+        if age_seconds >= runtime_settings.job_stuck_seconds and started_at is None:
+            return _claim_run_stale_failed(
+                run,
+                "ai_job_stuck",
+                "AI 任务长时间未被 Worker 消费，请检查 Celery Worker",
+                expected_status="queued",
+                require_unstarted=True,
+            )
+    if started_at is not None:
+        age_seconds = (now - started_at).total_seconds()
+        if age_seconds >= runtime_settings.job_timeout_seconds:
+            return _claim_run_stale_failed(
+                run,
+                "ai_job_timeout",
+                "AI 任务执行超时，请检查 Worker 或模型服务",
+                expected_status=run.status,
+                expected_started_at=started_at,
+            )
+    return False
+
+
+def _claim_run_stale_failed(
+    run: AIRun,
+    code: str,
+    message: str,
+    *,
+    expected_status: str,
+    require_unstarted: bool = False,
+    expected_started_at: datetime | None = None,
+) -> bool:
+    session = object_session(run)
+    if session is None:
+        return False
+    finished_at = utc_now()
+    started = ensure_utc(run.queued_at or run.started_at or run.created_at)
+    values: dict[str, Any] = {
+        "status": "failed",
+        "error_code": code,
+        "error_sanitized": message,
+        "error_message_sanitized": message,
+        "finished_at": finished_at,
+    }
+    if started:
+        total_latency_ms = max(0, int((finished_at - started).total_seconds() * 1000))
+        values["total_latency_ms"] = total_latency_ms
+        values["latency_ms"] = total_latency_ms
+    result = session.execute(
+        update(AIRun)
+        .where(
+            *_stale_run_filters(
+                run,
+                expected_status=expected_status,
+                require_unstarted=require_unstarted,
+                expected_started_at=expected_started_at,
+            )
+        )
+        .values(**values)
+        .execution_options(synchronize_session=False)
+    )
+    session.refresh(run)
+    return result.rowcount == 1
 
 
 def compute_input_hash(payload: dict[str, Any], prompt_version: str) -> str:
@@ -724,6 +879,182 @@ def _input_hash_lock_key(
     return f"{provider}:{model}:{event_id}:{prompt_version}:{input_hash}"
 
 
+def _finish_ai_run(
+    run: AIRun,
+    *,
+    event_id: int,
+    runtime_model: str,
+    runtime_provider: str,
+    started_at: datetime,
+    started_perf: float,
+    status: str,
+    worker_name: str | None,
+) -> None:
+    session = object_session(run)
+    values: dict[str, Any] = {
+        "status": status,
+        "started_at": run.started_at or started_at,
+        "worker_name": worker_name or run.worker_name,
+        "model": runtime_model,
+        "provider": runtime_provider,
+        "event_count": max(run.event_count or 0, 1),
+        "event_ids": run.event_ids or [event_id],
+        "total_latency_ms": int((time.perf_counter() - started_perf) * 1000),
+        "latency_ms": int((time.perf_counter() - started_perf) * 1000),
+    }
+    queued_at = ensure_utc(run.queued_at)
+    if queued_at:
+        values["queue_wait_ms"] = max(0, int((started_at - queued_at).total_seconds() * 1000))
+    if status == "succeeded":
+        values["finished_at"] = utc_now()
+    if session is None:
+        for key, value in values.items():
+            setattr(run, key, value)
+        return
+    result = session.execute(
+        update(AIRun)
+        .where(*_active_run_filters(run))
+        .values(**values)
+        .execution_options(synchronize_session=False)
+    )
+    if result.rowcount != 1:
+        session.refresh(run)
+        _raise_if_run_stopped(run)
+    session.refresh(run)
+
+
+def _claim_run_started(
+    session: Session,
+    run: AIRun,
+    *,
+    event_id: int,
+    runtime_model: str,
+    runtime_provider: str,
+    started_at: datetime,
+    worker_name: str | None,
+) -> bool:
+    values: dict[str, Any] = {
+        "status": "started",
+        "started_at": run.started_at or started_at,
+        "worker_name": worker_name or run.worker_name,
+        "model": runtime_model,
+        "provider": runtime_provider,
+        "event_count": max(run.event_count or 0, 1),
+        "event_ids": run.event_ids or [event_id],
+    }
+    queued_at = ensure_utc(run.queued_at)
+    if queued_at:
+        values["queue_wait_ms"] = max(0, int((started_at - queued_at).total_seconds() * 1000))
+    result = session.execute(
+        update(AIRun)
+        .where(*_active_run_filters(run))
+        .values(**values)
+        .execution_options(synchronize_session=False)
+    )
+    session.refresh(run)
+    return result.rowcount == 1
+
+
+def _success_status_for_run(run: AIRun) -> str:
+    return "started" if run.job_type == "summarize_event_batch" else "succeeded"
+
+
+def _claim_run_completion(
+    session: Session,
+    run: AIRun,
+    *,
+    status: str,
+    prompt_tokens: int,
+    completion_tokens: int,
+    retry_count: int,
+    provider_latency_ms: int,
+    started_perf: float,
+) -> bool:
+    now = utc_now()
+    total_latency_ms = int((time.perf_counter() - started_perf) * 1000)
+    values: dict[str, Any] = {
+        "status": status,
+        "prompt_tokens": (run.prompt_tokens or 0) + prompt_tokens,
+        "completion_tokens": (run.completion_tokens or 0) + completion_tokens,
+        "retry_count": max(run.retry_count or 0, retry_count),
+        "provider_latency_ms": (run.provider_latency_ms or 0) + provider_latency_ms,
+        "total_latency_ms": total_latency_ms,
+        "latency_ms": total_latency_ms,
+    }
+    if status == "succeeded":
+        values["finished_at"] = now
+    result = session.execute(
+        update(AIRun)
+        .where(*_active_run_filters(run))
+        .values(**values)
+        .execution_options(synchronize_session=False)
+    )
+    if result.rowcount != 1:
+        session.refresh(run)
+        return False
+    session.refresh(run)
+    return True
+
+
+def _claim_run_failure(
+    session: Session,
+    run: AIRun,
+    exc: BaseException,
+    *,
+    started_perf: float,
+) -> bool:
+    total_latency_ms = int((time.perf_counter() - started_perf) * 1000)
+    error_message = sanitize_error(exc)
+    result = session.execute(
+        update(AIRun)
+        .where(*_active_run_filters(run))
+        .values(
+            status="failed",
+            error_code=getattr(exc, "error_code", "ai_task_failed"),
+            error_sanitized=error_message,
+            error_message_sanitized=error_message,
+            finished_at=utc_now(),
+            total_latency_ms=total_latency_ms,
+            latency_ms=total_latency_ms,
+        )
+        .execution_options(synchronize_session=False)
+    )
+    session.refresh(run)
+    return result.rowcount == 1
+
+
+def _active_run_filters(run: AIRun) -> tuple[Any, ...]:
+    filters: list[Any] = [AIRun.id == run.id, AIRun.status.in_(ACTIVE_JOB_STATUSES)]
+    if run.task_id:
+        filters.append(AIRun.task_id == run.task_id)
+    return tuple(filters)
+
+
+def _stale_run_filters(
+    run: AIRun,
+    *,
+    expected_status: str,
+    require_unstarted: bool,
+    expected_started_at: datetime | None,
+) -> tuple[Any, ...]:
+    filters: list[Any] = [AIRun.id == run.id, AIRun.status == expected_status]
+    if run.task_id:
+        filters.append(AIRun.task_id == run.task_id)
+    if require_unstarted:
+        filters.append(AIRun.started_at.is_(None))
+    if expected_started_at is not None:
+        filters.append(AIRun.started_at == expected_started_at)
+    return tuple(filters)
+
+
+def _raise_if_run_stopped(run: AIRun) -> None:
+    if run.status == "cancelled":
+        raise AIJobCancelledError("AI 任务已取消")
+    if run.status == "failed":
+        raise AIJobStoppedError("AI 任务已结束，跳过写入结果")
+    raise AIJobStoppedError("AI 任务状态已变化，跳过写入结果")
+
+
 def _json_dumps(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
@@ -751,7 +1082,27 @@ def summarize_event_sync(
     *,
     force: bool = False,
     auto: bool = False,
+    timeout_seconds: int | None = None,
+    run: AIRun | None = None,
+    worker_name: str | None = None,
+    job_type: str = "summarize_event",
 ) -> EventAIInsight:
     import asyncio
 
-    return asyncio.run(AIService(session).summarize_event(event_id, force=force, auto=auto))
+    async def _run() -> EventAIInsight:
+        coroutine = AIService(session).summarize_event(
+            event_id,
+            force=force,
+            auto=auto,
+            run=run,
+            worker_name=worker_name,
+            job_type=job_type,
+        )
+        if timeout_seconds is None:
+            return await coroutine
+        return await asyncio.wait_for(coroutine, timeout=timeout_seconds)
+
+    try:
+        return asyncio.run(_run())
+    except TimeoutError as exc:
+        raise AIRuntimeTimeoutError("AI 同步生成超时") from exc

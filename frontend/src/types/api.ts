@@ -97,6 +97,47 @@ export type EventAiInsight = {
   prompt_tokens?: number;
   completion_tokens?: number;
   total_tokens?: number;
+  input_quality?: InputQuality;
+};
+
+export type AiJobStatus = "queued" | "started" | "retrying" | "succeeded" | "failed" | "cancelled";
+export type InputQuality = "title_only" | "summary" | "excerpt" | "multi_source";
+
+export type AiJob = {
+  id?: string | number;
+  job_id?: string;
+  task_id?: string;
+  poll_url?: string;
+  status?: AiJobStatus | string;
+  queued?: boolean;
+  event_id?: number | null;
+  event_ids?: number[];
+  queued_at?: string | null;
+  started_at?: string | null;
+  finished_at?: string | null;
+  queue_wait_ms?: number | null;
+  provider_latency_ms?: number | null;
+  total_latency_ms?: number | null;
+  worker_name?: string | null;
+  retry_count?: number;
+  error_code?: string | null;
+  error_message_sanitized?: string | null;
+  error_sanitized?: string | null;
+  input_quality?: InputQuality | string | null;
+  insight?: EventAiInsight | null;
+  insight_id?: string | number | null;
+};
+
+export type AiSummarySubmitResponse = AiJob | EventAiInsight;
+
+export type AiRuntimeStatus = {
+  mode?: "sync" | "async" | string;
+  status?: "healthy" | "degraded" | "unavailable" | string;
+  redis_available?: boolean;
+  worker_available?: boolean;
+  worker_heartbeat_at?: string | null;
+  message?: string | null;
+  error_sanitized?: string | null;
 };
 export type SourceRow = {
   id: number;

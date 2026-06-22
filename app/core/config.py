@@ -60,11 +60,20 @@ class Settings(BaseSettings):
     ai_enabled: bool = False
     ai_auto_process_enabled: bool = False
     ai_provider: str = "deepseek"
+    ai_execution_mode: Literal["sync", "async"] = "async"
+    ai_sync_allowed_environments: str = "local,development,test"
+    ai_sync_timeout_seconds: int = Field(default=60, ge=1, le=240)
+    ai_queue_name: str = "ai"
+    ai_job_stuck_seconds: int = Field(default=10, ge=1, le=300)
+    ai_job_timeout_seconds: int = Field(default=90, ge=5, le=600)
+    ai_default_mode: Literal["fast", "deep"] = "fast"
     deepseek_api_base: str = "https://api.deepseek.com"
     deepseek_request_timeout_seconds: int = Field(default=90, ge=1, le=300)
     deepseek_max_concurrency: int = Field(default=2, ge=1, le=10)
     deepseek_daily_token_budget: int = Field(default=0, ge=0)
     deepseek_allow_custom_api_base: bool = False
+    celery_broker_url: str | None = None
+    celery_result_backend: str | None = None
 
     telegram_bot_token: str | None = None
     telegram_chat_id: str | None = None
