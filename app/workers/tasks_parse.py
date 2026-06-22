@@ -5,7 +5,7 @@ import asyncio
 from sqlalchemy import select
 
 from app.adapters.registry import registry
-from app.core.config import SourceConfig
+from app.core.config import SourceConfig, settings
 from app.db.models import RawDocument
 from app.db.session import SessionLocal
 from app.observability.metrics import normalized_items_total, parse_results_total
@@ -66,8 +66,31 @@ async def _parse_raw_document(raw_document_id: int) -> dict[str, int | str]:
         parsed_items = await adapter.parse(source_config, payload)
         parse_results_total.labels(adapter=source.adapter, outcome="success").inc()
         normalized_items_total.labels(adapter=source.adapter).inc(len(parsed_items))
+        event_ids: set[int] = set()
         for item in parsed_items:
-            dedupe.upsert_event(item, source=source, raw_document=raw_document)
+            event = dedupe.upsert_event(item, source=source, raw_document=raw_document)
+            if event.id is not None:
+                event_ids.add(int(event.id))
             item_count += 1
         session.commit()
+        _enqueue_event_pipeline(event_ids)
         return {"status": "success", "items": item_count}
+
+
+def _enqueue_event_pipeline(event_ids: set[int]) -> None:
+    if not event_ids:
+        return
+    if not (
+        settings.ai_enabled
+        or settings.ai_auto_process_enabled
+        or settings.feishu_enabled
+        or settings.feishu_send_enabled
+    ):
+        return
+    from app.workers.tasks_publish import process_event_pipeline
+
+    for event_id in sorted(event_ids):
+        try:
+            process_event_pipeline.delay(event_id)
+        except Exception:
+            continue

@@ -65,6 +65,7 @@ from app.integrations.feishu.errors import FeishuAuthenticationError
 from app.integrations.feishu.report_cards import event_ai_summary
 from app.integrations.feishu.reporting import FeishuReportService, next_run_at
 from app.integrations.feishu.token_provider import FeishuTokenProvider
+from app.pipeline.event_pipeline import build_event_pipeline, load_event_for_pipeline
 from app.publishers.feishu import publish_feishu_once
 from app.scheduler.planner import mark_source_queued
 from app.schemas.admin import (
@@ -122,6 +123,7 @@ from app.schemas.feishu_report import (
     ReportScheduleRead,
     ReportSendResultRead,
 )
+from app.schemas.pipeline import EventPipelineRead
 from app.schemas.source import SourceRead
 from app.workers.celery_app import celery_app
 from app.workers.tasks_feishu_reports import run_feishu_report_schedule
@@ -488,6 +490,20 @@ def admin_event_detail(
     if event is None:
         raise HTTPException(status_code=404, detail="event not found")
     return EventDetail.model_validate(event)
+
+
+@router.get("/events/{event_id}/pipeline", response_model=EventPipelineRead)
+def admin_event_pipeline(
+    event_id: int,
+    _: AdminPrincipal = Depends(require_admin_session),
+    session: Session = Depends(get_session),
+) -> EventPipelineRead:
+    event = load_event_for_pipeline(session, event_id)
+    if event is None:
+        raise HTTPException(status_code=404, detail="事件不存在")
+    if mark_stale_ai_runs(session):
+        session.commit()
+    return build_event_pipeline(session, event)
 
 
 @router.post("/events/{event_id}/republish")
@@ -1627,6 +1643,8 @@ def retry_delivery(
     delivery = session.get(Delivery, delivery_id)
     if delivery is None:
         raise HTTPException(status_code=404, detail="delivery not found")
+    if delivery.status == "delivered":
+        return {"delivery_id": delivery_id, "queued": False}
     delivery.status = "pending"
     republish_event.delay(delivery.event_id)
     _audit(session, principal, request, "retry", "delivery", str(delivery_id), {})

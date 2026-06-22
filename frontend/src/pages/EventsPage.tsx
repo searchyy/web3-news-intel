@@ -16,6 +16,7 @@ import {
   Switch,
   Table,
   Tag,
+  Timeline,
   Typography,
   message
 } from "antd";
@@ -49,6 +50,16 @@ import {
   shouldWarnInputQuality
 } from "../api/aiJobs";
 import { api } from "../api/client";
+import {
+  formatPipelinePreview,
+  getEventPipeline,
+  normalizeEventPipeline,
+  pipelineStatusColor,
+  pipelineStatusText,
+  pipelineTimelineColor,
+  redactSensitiveText
+} from "../api/eventPipeline";
+import type { EventPipelineDelivery, NormalizedEventPipeline } from "../api/eventPipeline";
 import { normalizePaginated } from "../api/pagination";
 import { useAuth } from "../auth/AuthContext";
 import { QUERY_REFETCH_INTERVAL, QUERY_STALE_TIME, useDocumentVisible, visibleOnlyRefetchInterval } from "../queryConfig";
@@ -320,6 +331,26 @@ export function EventsPage() {
     staleTime: QUERY_STALE_TIME.eventInsight
   });
 
+  const pipelineQuery = useQuery({
+    queryKey: ["event-pipeline", selected?.id],
+    queryFn: () => getEventPipeline(selected!.id),
+    enabled: Boolean(selected?.id),
+    retry: false,
+    staleTime: 5_000,
+    refetchInterval: (query) => {
+      if (!documentVisible) {
+        return false;
+      }
+      const pipeline = normalizeEventPipeline(query.state.data);
+      return pipeline.items.some((item) => ["queued", "started", "retrying", "sending"].includes(item.status))
+        ? 5_000
+        : false;
+    },
+    refetchIntervalInBackground: false
+  });
+
+  const selectedPipeline = useMemo(() => normalizeEventPipeline(pipelineQuery.data), [pipelineQuery.data]);
+
   useEffect(() => {
     if (!activeAiJob || isTerminalAiJobStatus(activeAiJob.status)) {
       return undefined;
@@ -385,6 +416,7 @@ export function EventsPage() {
       }
       eventIds.forEach((eventId) => {
         queryClient.invalidateQueries({ queryKey: ["event-ai-insight", eventId], exact: true });
+        queryClient.invalidateQueries({ queryKey: ["event-pipeline", eventId], exact: true });
       });
       queryClient.invalidateQueries({ queryKey: ["ai-job", activeAiJob.jobId], exact: true });
       queryClient.invalidateQueries({ queryKey: ["events", filters], exact: true });
@@ -392,6 +424,9 @@ export function EventsPage() {
       return;
     }
 
+    eventIds.forEach((eventId) => {
+      queryClient.invalidateQueries({ queryKey: ["event-pipeline", eventId], exact: true });
+    });
     message.error(sanitizedError ?? "AI 整理任务失败，请检查 Worker 状态后重试。");
   }, [activeAiJob, aiJobQuery.data, filters, queryClient, reportedTerminalJobId]);
 
@@ -792,6 +827,11 @@ export function EventsPage() {
               fallback={selected}
               job={activeAiJob?.eventIds.includes(selected.id) ? activeAiJob : undefined}
             />
+            <EventPipelinePanel
+              pipeline={selectedPipeline}
+              loading={pipelineQuery.isLoading}
+              error={pipelineQuery.isError}
+            />
           </Space>
         ) : null}
       </Drawer>
@@ -813,6 +853,7 @@ export function EventsPage() {
     if (isAiInsightResponse(typedResult)) {
       queryClient.setQueryData(["event-ai-insight", typedResult.event_id], typedResult);
       queryClient.invalidateQueries({ queryKey: ["event-ai-insight", typedResult.event_id], exact: true });
+      queryClient.invalidateQueries({ queryKey: ["event-pipeline", typedResult.event_id], exact: true });
       queryClient.invalidateQueries({ queryKey: ["events", filters], exact: true });
       message.success("AI 摘要已生成");
       return;
@@ -842,6 +883,7 @@ export function EventsPage() {
     queryClient.setQueryData(["ai-job", job.job_id], job);
     nextEventIds.forEach((eventId) => {
       queryClient.invalidateQueries({ queryKey: ["event-ai-insight", eventId], exact: true });
+      queryClient.invalidateQueries({ queryKey: ["event-pipeline", eventId], exact: true });
     });
     message.success(successText);
     if (shouldWarnInputQuality(job.input_quality)) {
@@ -913,6 +955,129 @@ function AiInsightPanel({
         <Empty description="暂无 AI 摘要" />
       )}
     </Card>
+  );
+}
+
+function EventPipelinePanel({
+  pipeline,
+  loading,
+  error
+}: {
+  pipeline: NormalizedEventPipeline;
+  loading: boolean;
+  error: boolean;
+}) {
+  const previewText = formatPipelinePreview(pipeline.cardPreview);
+
+  if (loading) {
+    return <Card title="处理时间线" loading />;
+  }
+
+  if (error) {
+    return (
+      <Card title="处理时间线">
+        <Alert
+          type="info"
+          showIcon
+          message="处理时间线暂不可用"
+          description="已调用 GET /api/admin/events/{event_id}/pipeline，后端路由未接入或当前不可用。"
+        />
+      </Card>
+    );
+  }
+
+  return (
+    <Card title="处理时间线">
+      <Space direction="vertical" size={16} className="page-stack">
+        {pipeline.items.length ? (
+          <Timeline
+            items={pipeline.items.map((item) => ({
+              key: item.id,
+              color: pipelineTimelineColor(item.status, item.stage),
+              children: (
+                <Space direction="vertical" size={4} className="page-stack">
+                  <Space wrap>
+                    <Typography.Text strong>{item.title}</Typography.Text>
+                    <Tag color={pipelineStatusColor(item.status, item.stage)}>{item.statusLabel}</Tag>
+                    <Typography.Text type="secondary">{item.stageLabel}</Typography.Text>
+                  </Space>
+                  {item.time ? <Typography.Text type="secondary">{formatTime(item.time)}</Typography.Text> : null}
+                  {item.description ? <Typography.Text>{item.description}</Typography.Text> : null}
+                  {item.error ? <Typography.Text type="danger">{item.error}</Typography.Text> : null}
+                  {item.jobId || item.deliveryId || item.retryCount ? (
+                    <Space wrap size={[4, 4]}>
+                      {item.jobId ? <Tag>Job {redactSensitiveText(item.jobId)}</Tag> : null}
+                      {item.deliveryId ? <Tag>Delivery {redactSensitiveText(String(item.deliveryId))}</Tag> : null}
+                      {item.retryCount ? <Tag>重试 {item.retryCount} 次</Tag> : null}
+                    </Space>
+                  ) : null}
+                </Space>
+              )
+            }))}
+          />
+        ) : (
+          <Empty description="暂无处理时间线" />
+        )}
+
+        {previewText ? (
+          <>
+            <Divider />
+            <Typography.Text strong>卡片预览</Typography.Text>
+            <pre
+              style={{
+                margin: 0,
+                maxHeight: 260,
+                overflow: "auto",
+                padding: 12,
+                whiteSpace: "pre-wrap",
+                wordBreak: "break-word",
+                background: "#f6f8fa",
+                border: "1px solid #edf0f2",
+                borderRadius: 6
+              }}
+            >
+              {previewText}
+            </pre>
+          </>
+        ) : null}
+
+        {pipeline.delivery ? <DeliveryStatusPanel delivery={pipeline.delivery} /> : null}
+      </Space>
+    </Card>
+  );
+}
+
+function DeliveryStatusPanel({ delivery }: { delivery: EventPipelineDelivery }) {
+  const deliveryId = delivery.delivery_id ?? delivery.id;
+  const status = String(delivery.status ?? "queued");
+  return (
+    <>
+      <Divider />
+      <Typography.Text strong>Delivery 状态</Typography.Text>
+      <Descriptions bordered column={1} size="small">
+        {deliveryId ? <Descriptions.Item label="Delivery ID">{redactSensitiveText(String(deliveryId))}</Descriptions.Item> : null}
+        <Descriptions.Item label="状态">
+          <Space wrap>
+            <Tag color={pipelineStatusColor(status, "feishu")}>{pipelineStatusText("feishu", status)}</Tag>
+            {delivery.dry_run ? <Tag color="warning">dry-run</Tag> : null}
+          </Space>
+        </Descriptions.Item>
+        {delivery.channel ? <Descriptions.Item label="通道">{delivery.channel}</Descriptions.Item> : null}
+        {delivery.target ? <Descriptions.Item label="目标">{delivery.target}</Descriptions.Item> : null}
+        {typeof delivery.attempts === "number" ? <Descriptions.Item label="尝试次数">{delivery.attempts}</Descriptions.Item> : null}
+        {typeof delivery.response_status === "number" ? (
+          <Descriptions.Item label="响应状态">{delivery.response_status}</Descriptions.Item>
+        ) : null}
+        {delivery.provider_message_id ? (
+          <Descriptions.Item label="回执">{delivery.provider_message_id}</Descriptions.Item>
+        ) : null}
+        {delivery.delivered_at ? <Descriptions.Item label="送达时间">{formatTime(delivery.delivered_at)}</Descriptions.Item> : null}
+        {delivery.last_error ? <Descriptions.Item label="错误">{delivery.last_error}</Descriptions.Item> : null}
+        {delivery.suppressed_reason ? (
+          <Descriptions.Item label="抑制原因">{redactSensitiveText(delivery.suppressed_reason)}</Descriptions.Item>
+        ) : null}
+      </Descriptions>
+    </>
   );
 }
 

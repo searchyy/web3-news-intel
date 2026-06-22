@@ -91,6 +91,7 @@ class DestinationRouter:
             Delivery.destination_id == destination.id,
             Delivery.event_id == event.id,
             Delivery.delivery_variant == delivery_variant,
+            Delivery.status.in_(["delivered", "sending"]),
         )
         return self.session.scalar(stmt) is not None
 

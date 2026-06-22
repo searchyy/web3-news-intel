@@ -104,6 +104,44 @@ describe("events search page", () => {
       if (url.includes("/api/admin/events/1/ai-insight")) {
         return Promise.resolve(json({ event_id: 1, provider: "deepseek", model: "mock" }));
       }
+      if (url.includes("/api/admin/events/1/pipeline")) {
+        return Promise.resolve(
+          json({
+            event_id: 1,
+            timeline: [
+              { id: "fetch", stage: "fetch", status: "succeeded", title: "源站抓取完成" },
+              { id: "parse", stage: "parse", status: "succeeded", title: "正文解析完成" },
+              { id: "event", stage: "event", status: "succeeded", title: "事件已入库" },
+              { id: "ai-queued", stage: "ai", status: "queued", title: "AI 排队中", job_id: "job-1" },
+              { id: "ai-started", stage: "ai", status: "started", title: "AI 生成中", job_id: "job-1" },
+              { id: "ai-retrying", stage: "ai", status: "retrying", title: "AI 重试中", retry_count: 1 },
+              { id: "ai-succeeded", stage: "ai", status: "succeeded", title: "AI 已完成" },
+              { id: "ai-failed", stage: "ai", status: "failed", title: "AI 失败", error_sanitized: "模型超时" },
+              { id: "ai-cancelled", stage: "ai", status: "cancelled", title: "AI 已取消" },
+              { id: "feishu-queued", stage: "feishu", status: "queued", title: "飞书待发送" },
+              { id: "feishu-sending", stage: "feishu", status: "sending", title: "飞书发送中" },
+              { id: "feishu-delivered", stage: "feishu", status: "delivered", title: "飞书已送达", delivery_id: 12 },
+              { id: "feishu-failed", stage: "feishu", status: "failed", title: "飞书发送失败" },
+              { id: "feishu-dry-run", stage: "feishu", status: "dry_run", title: "飞书 dry-run" },
+              { id: "feishu-suppressed", stage: "feishu", status: "suppressed", title: "飞书已抑制" }
+            ],
+            delivery: {
+              delivery_id: 12,
+              status: "dry_run",
+              dry_run: true,
+              channel: "feishu",
+              target: "Mock 飞书群",
+              attempts: 1,
+              provider_message_id: "dry-run"
+            },
+            card_preview: {
+              title: "BTC 汇报卡片",
+              webhook_url: "https://example.invalid/redacted-webhook/secret-token",
+              content: "AI 已整理 BTC 上币事件。"
+            }
+          })
+        );
+      }
       if (url.includes("/api/admin/events/1/ai-summary") && method === "POST") {
         return Promise.resolve(
           json({
@@ -157,6 +195,15 @@ describe("events search page", () => {
     renderPage();
 
     await userEvent.click(await screen.findByRole("button", { name: "BTC listing" }));
+    expect(await screen.findByText("处理时间线")).toBeInTheDocument();
+    expect(await screen.findByText("源站抓取完成")).toBeInTheDocument();
+    expect(await screen.findByText("AI 已取消")).toBeInTheDocument();
+    expect(await screen.findByText("飞书已送达")).toBeInTheDocument();
+    expect(await screen.findByText("Delivery 状态")).toBeInTheDocument();
+    expect(await screen.findAllByText("Dry-run 未实发")).not.toHaveLength(0);
+    expect(await screen.findByText(/BTC 汇报卡片/)).toBeInTheDocument();
+    expect(screen.queryByText(/secret-token/)).not.toBeInTheDocument();
+
     await userEvent.click(await screen.findByRole("button", { name: /重新生成/ }));
 
     expect(await screen.findAllByText("排队中")).not.toHaveLength(0);

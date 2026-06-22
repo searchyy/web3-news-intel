@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import timedelta
 
 import pytest
 
+from app.core.config import settings
 from app.core.time import utc_now
 from app.db.models import AIRun
 from app.integrations.ai.runtime import (
@@ -17,9 +19,16 @@ from app.integrations.ai.runtime import (
     get_ai_runtime_settings,
     validate_sync_execution_allowed,
 )
-from app.integrations.ai.service import AIService, summarize_event_sync
+from app.integrations.ai.service import AIService, mark_stale_ai_runs, summarize_event_sync
 from app.workers.celery_app import celery_app
-from app.workers.tasks_ai import _claim_started, summarize_event, summarize_event_batch
+from app.workers.tasks_ai import (
+    _claim_batch_success,
+    _claim_failed,
+    _claim_retrying,
+    _claim_started,
+    summarize_event,
+    summarize_event_batch,
+)
 
 
 def test_ai_runtime_settings_default_to_async_ai_queue(monkeypatch) -> None:
@@ -34,6 +43,12 @@ def test_ai_runtime_settings_default_to_async_ai_queue(monkeypatch) -> None:
         "CELERY_RESULT_BACKEND",
     ):
         monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(settings, "ai_execution_mode", "async")
+    monkeypatch.setattr(settings, "ai_sync_allowed_environments", "local,development,test")
+    monkeypatch.setattr(settings, "ai_sync_timeout_seconds", 60)
+    monkeypatch.setattr(settings, "ai_queue_name", "ai")
+    monkeypatch.setattr(settings, "ai_job_stuck_seconds", 10)
+    monkeypatch.setattr(settings, "ai_job_timeout_seconds", 90)
 
     runtime_settings = get_ai_runtime_settings()
 
@@ -173,6 +188,71 @@ def test_ai_worker_started_claim_rejects_stale_task_id(db_session) -> None:
     assert run.worker_name == "worker-a"
 
 
+def test_ai_stale_sweep_fails_active_jobs_without_touching_terminal_statuses(
+    monkeypatch, db_session
+) -> None:
+    monkeypatch.setenv("AI_JOB_STUCK_SECONDS", "5")
+    monkeypatch.setenv("AI_JOB_TIMEOUT_SECONDS", "10")
+    old_queued_at = utc_now() - timedelta(seconds=30)
+    old_started_at = utc_now() - timedelta(seconds=30)
+    active_runs = [
+        _ai_run(status="queued", queued_at=old_queued_at),
+        _ai_run(status="started", queued_at=old_queued_at, started_at=old_started_at),
+        _ai_run(status="retrying", queued_at=old_queued_at),
+    ]
+    terminal_runs = [
+        _ai_run(status="succeeded", queued_at=old_queued_at, started_at=old_started_at),
+        _ai_run(status="failed", queued_at=old_queued_at, started_at=old_started_at),
+        _ai_run(status="cancelled", queued_at=old_queued_at, started_at=old_started_at),
+    ]
+    db_session.add_all(active_runs + terminal_runs)
+    db_session.flush()
+
+    changed = mark_stale_ai_runs(db_session)
+
+    assert changed == 3
+    assert [run.status for run in active_runs] == ["failed", "failed", "failed"]
+    assert [run.error_code for run in active_runs] == [
+        "ai_job_timeout",
+        "ai_job_timeout",
+        "ai_job_timeout",
+    ]
+    assert [run.status for run in terminal_runs] == ["succeeded", "failed", "cancelled"]
+
+
+def test_ai_worker_terminal_claims_are_idempotent(db_session) -> None:
+    terminal_runs = [
+        _ai_run(status="succeeded", task_id="task-succeeded"),
+        _ai_run(status="failed", task_id="task-failed"),
+        _ai_run(status="cancelled", task_id="task-cancelled"),
+    ]
+    db_session.add_all(terminal_runs)
+    db_session.flush()
+
+    assert (
+        _claim_retrying(
+            db_session,
+            terminal_runs[0],
+            RuntimeError("retry later"),
+            retry_count=1,
+            request_id="task-succeeded",
+        )
+        is False
+    )
+    assert (
+        _claim_failed(
+            db_session,
+            terminal_runs[1],
+            RuntimeError("late failure"),
+            request_id="task-failed",
+        )
+        is False
+    )
+    assert _claim_batch_success(db_session, terminal_runs[2], request_id="task-cancelled") is False
+
+    assert [run.status for run in terminal_runs] == ["succeeded", "failed", "cancelled"]
+
+
 def test_summarize_event_sync_raises_chinese_timeout(monkeypatch, db_session) -> None:
     async def slow_summary(self: AIService, event_id: int, **_kwargs):
         await asyncio.sleep(1)
@@ -183,6 +263,26 @@ def test_summarize_event_sync_raises_chinese_timeout(monkeypatch, db_session) ->
         summarize_event_sync(db_session, 1, timeout_seconds=0)
 
     assert "AI 同步生成超时" in str(exc_info.value)
+
+
+def _ai_run(
+    *,
+    status: str,
+    queued_at=None,
+    started_at=None,
+    task_id: str | None = None,
+) -> AIRun:
+    return AIRun(
+        job_type="summarize_event",
+        provider="deepseek",
+        model="deepseek-chat",
+        event_count=1,
+        event_ids=[1],
+        status=status,
+        queued_at=queued_at or utc_now(),
+        started_at=started_at,
+        task_id=task_id,
+    )
 
 
 def _runtime_settings(

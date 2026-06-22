@@ -7,6 +7,8 @@ from app.core.field_encryption import FieldEncryptor
 from app.db.repositories.event_repo import EventRepository
 from app.db.repositories.notification_repo import NotificationRepository
 from app.db.session import SessionLocal
+from app.integrations.ai.deepseek.errors import AIProviderError
+from app.integrations.ai.service import AIService, sanitize_error
 from app.pipeline.alert_rules import AlertEngine
 from app.pipeline.destination_router import DestinationRouter
 from app.publishers.base import DeliveryManager
@@ -20,6 +22,50 @@ from app.workers.celery_app import celery_app
 @celery_app.task(name="app.workers.tasks_publish.republish_event")
 def republish_event(event_id: int) -> dict[str, int | str]:
     return asyncio.run(_republish_event(event_id))
+
+
+@celery_app.task(name="app.workers.tasks_publish.process_event_pipeline")
+def process_event_pipeline(event_id: int) -> dict[str, int | str]:
+    return asyncio.run(_process_event_pipeline(event_id))
+
+
+async def _process_event_pipeline(event_id: int) -> dict[str, int | str]:
+    ai_status = "skipped"
+    with SessionLocal() as session:
+        event = EventRepository(session).get(event_id)
+        if event is None:
+            return {"status": "not_found", "event_id": event_id, "deliveries": 0}
+        config = AIService(session).get_or_create_provider_config("deepseek")
+        should_auto_ai = bool(
+            settings.ai_enabled
+            and settings.ai_auto_process_enabled
+            and config.enabled
+            and config.auto_process_enabled
+        )
+        if should_auto_ai:
+            try:
+                await AIService(session).summarize_event(
+                    event_id,
+                    force=False,
+                    auto=True,
+                    job_type="summarize_event",
+                    worker_name="pipeline",
+                )
+                session.commit()
+                ai_status = "succeeded"
+            except AIProviderError as exc:
+                session.rollback()
+                ai_status = f"failed:{sanitize_error(exc)}"
+            except Exception as exc:
+                session.rollback()
+                ai_status = f"failed:{sanitize_error(exc)}"
+    publish_result = await _republish_event(event_id)
+    return {
+        "status": "processed",
+        "event_id": event_id,
+        "ai_status": ai_status,
+        "deliveries": int(publish_result.get("deliveries", 0)),
+    }
 
 
 async def _republish_event(event_id: int) -> dict[str, int | str]:

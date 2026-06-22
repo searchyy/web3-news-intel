@@ -9,7 +9,7 @@ from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 
 from app.adapters.registry import registry
-from app.core.config import SourceConfig, load_runtime_sources
+from app.core.config import SourceConfig, load_runtime_sources, settings
 from app.core.errors import AccessDeniedError, FetchError
 from app.core.time import ensure_utc, utc_now
 from app.db.models import FetchRun, Source
@@ -288,6 +288,25 @@ def enqueue_fetch_run(source_key: str, fetch_run_id: int) -> bool:
     return True
 
 
+def _enqueue_event_pipeline(event_ids: set[int]) -> None:
+    if not event_ids:
+        return
+    if not (
+        settings.ai_enabled
+        or settings.ai_auto_process_enabled
+        or settings.feishu_enabled
+        or settings.feishu_send_enabled
+    ):
+        return
+    from app.workers.tasks_publish import process_event_pipeline
+
+    for event_id in sorted(event_ids):
+        try:
+            process_event_pipeline.delay(event_id)
+        except Exception:
+            continue
+
+
 def _mark_enqueue_failed(fetch_run_id: int) -> None:
     with SessionLocal() as session:
         fetch_run = session.get(FetchRun, fetch_run_id)
@@ -378,6 +397,7 @@ async def _store_fetch_result(
         raw_repo = RawDocumentRepository(session)
         dedupe = DedupeService(session)
         item_count = 0
+        event_ids: set[int] = set()
         for raw in raw_documents:
             fetch_run.http_status = raw.status_code
             _store_conditional_headers(source, raw.metadata)
@@ -399,7 +419,9 @@ async def _store_fetch_result(
             parse_results_total.labels(adapter=config.adapter, outcome="success").inc()
             normalized_items_total.labels(adapter=config.adapter).inc(len(parsed_items))
             for item in parsed_items:
-                dedupe.upsert_event(item, source=source, raw_document=raw_document)
+                event = dedupe.upsert_event(item, source=source, raw_document=raw_document)
+                if event.id is not None:
+                    event_ids.add(int(event.id))
                 item_count += 1
         finished_at = utc_now()
         fetch_run.status = "success"
@@ -412,6 +434,7 @@ async def _store_fetch_result(
             parsed_count=item_count,
         )
         session.commit()
+        _enqueue_event_pipeline(event_ids)
         return {"status": "success", "items": item_count}
 
 

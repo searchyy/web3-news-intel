@@ -668,22 +668,22 @@ def mark_stale_ai_run(run: AIRun) -> bool:
     now = utc_now()
     queued_at = ensure_utc(run.queued_at or run.created_at)
     started_at = ensure_utc(run.started_at)
-    if run.status == "queued" and queued_at is not None:
+    if started_at is None and queued_at is not None:
         age_seconds = (now - queued_at).total_seconds()
         if age_seconds >= runtime_settings.job_timeout_seconds:
             return _claim_run_stale_failed(
                 run,
                 "ai_job_timeout",
                 "AI 任务排队超时，请检查 Worker 状态后重试",
-                expected_status="queued",
+                expected_status=run.status,
                 require_unstarted=True,
             )
-        if age_seconds >= runtime_settings.job_stuck_seconds and started_at is None:
+        if age_seconds >= runtime_settings.job_stuck_seconds:
             return _claim_run_stale_failed(
                 run,
                 "ai_job_stuck",
                 "AI 任务长时间未被 Worker 消费，请检查 Celery Worker",
-                expected_status="queued",
+                expected_status=run.status,
                 require_unstarted=True,
             )
     if started_at is not None:

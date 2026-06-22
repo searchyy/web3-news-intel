@@ -3,11 +3,19 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime, timedelta
 
+import pytest
 from sqlalchemy import func, select
 
+from app.core.config import settings
 from app.core.time import utc_now
 from app.db.models import Delivery, Event, NotificationDestination, ReportSchedule, SavedSearch
 from app.integrations.feishu.reporting import FeishuReportService
+
+
+@pytest.fixture(autouse=True)
+def disable_real_feishu_send(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "feishu_enabled", False)
+    monkeypatch.setattr(settings, "feishu_send_enabled", False)
 
 
 def test_report_schedule_window_idempotency(db_session) -> None:
@@ -141,6 +149,37 @@ def test_duplicate_schedules_share_one_delivery_for_same_window(db_session) -> N
     )
 
     assert db_session.scalar(select(func.count(Delivery.id))) == 1
+
+
+def test_report_send_exception_marks_delivery_failed(db_session, monkeypatch) -> None:
+    now = datetime(2026, 6, 21, 9, 30, tzinfo=UTC)
+    destination = _destination(now)
+    db_session.add(destination)
+    db_session.flush()
+    event = _event("event:report-failure", "汇报失败事件", now - timedelta(minutes=3))
+    schedule = _schedule(destination, activated_at=now - timedelta(hours=1))
+    db_session.add_all([event, schedule])
+    db_session.flush()
+    service = FeishuReportService(db_session)
+
+    async def fail_send(*_args, **_kwargs):
+        raise RuntimeError("webhook token secret leaked")
+
+    monkeypatch.setattr(service, "_send", fail_send)
+
+    outcome = asyncio.run(
+        service.send_report_for_window(
+            schedule,
+            window_start=now - timedelta(minutes=15),
+            window_end=now,
+        )
+    )
+
+    assert outcome.status == "failed"
+    delivery = db_session.scalar(select(Delivery))
+    assert delivery is not None
+    assert delivery.status == "failed"
+    assert delivery.last_error == "Feishu delivery failed"
 
 
 def _destination(now: datetime) -> NotificationDestination:

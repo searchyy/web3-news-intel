@@ -95,6 +95,9 @@ test("mock 管理端搜索、AI 与飞书汇报流程", async ({ page }) => {
     if (path === "/api/admin/ai/jobs/mock-ai-task" && method === "GET") {
       return route.fulfill({ json: { job_id: "mock-ai-task", status: "succeeded", event_ids: [1] } });
     }
+    if (path === "/api/admin/events/1/pipeline" && method === "GET") {
+      return route.fulfill({ json: eventPipeline() });
+    }
     if (path === "/api/admin/ai/providers/deepseek" && method === "GET") {
       return route.fulfill({
         json: {
@@ -202,6 +205,15 @@ test("mock 管理端搜索、AI 与飞书汇报流程", async ({ page }) => {
   await page.getByRole("checkbox").nth(1).check();
   await page.getByRole("button", { name: /对选中事件进行 AI 整理/ }).click();
   await expect(page.getByText("已提交 AI 整理任务")).toBeVisible();
+  await page.getByRole("button", { name: "BTC 上币公告" }).click();
+  await expect(page.getByText("处理时间线")).toBeVisible();
+  await expect(page.getByText("源站抓取完成")).toBeVisible();
+  await expect(page.getByText("AI 已完成")).toBeVisible();
+  await expect(page.getByText("飞书已送达")).toBeVisible();
+  await expect(page.getByText("Delivery 状态")).toBeVisible();
+  await expect(page.getByText("Dry-run 未实发").first()).toBeVisible();
+  await expect(page.getByText(/BTC 汇报卡片/)).toBeVisible();
+  await expect(page.getByText(/secret-token/)).toHaveCount(0);
 
   await page.goto("/settings/ai");
   await page.getByLabel("API Key（只写）").fill("sk-mock-only");
@@ -254,5 +266,42 @@ function reportPreview() {
         chains: ["Bitcoin"]
       }
     ]
+  };
+}
+
+function eventPipeline() {
+  return {
+    event_id: 1,
+    timeline: [
+      { id: "fetch", stage: "fetch", status: "succeeded", title: "源站抓取完成" },
+      { id: "parse", stage: "parse", status: "succeeded", title: "正文解析完成" },
+      { id: "event", stage: "event", status: "succeeded", title: "事件已入库" },
+      { id: "ai-queued", stage: "ai", status: "queued", title: "AI 排队中" },
+      { id: "ai-started", stage: "ai", status: "started", title: "AI 生成中" },
+      { id: "ai-retrying", stage: "ai", status: "retrying", title: "AI 重试中", retry_count: 1 },
+      { id: "ai-succeeded", stage: "ai", status: "succeeded", title: "AI 已完成" },
+      { id: "ai-failed", stage: "ai", status: "failed", title: "AI 失败", error_sanitized: "模型超时" },
+      { id: "ai-cancelled", stage: "ai", status: "cancelled", title: "AI 已取消" },
+      { id: "feishu-queued", stage: "feishu", status: "queued", title: "飞书待发送" },
+      { id: "feishu-sending", stage: "feishu", status: "sending", title: "飞书发送中" },
+      { id: "feishu-delivered", stage: "feishu", status: "delivered", title: "飞书已送达", delivery_id: 1 },
+      { id: "feishu-failed", stage: "feishu", status: "failed", title: "飞书发送失败" },
+      { id: "feishu-dry-run", stage: "feishu", status: "dry_run", title: "飞书 dry-run" },
+      { id: "feishu-suppressed", stage: "feishu", status: "suppressed", title: "飞书已抑制" }
+    ],
+    delivery: {
+      delivery_id: 1,
+      status: "dry_run",
+      dry_run: true,
+      channel: "feishu",
+      target: "Mock 飞书群",
+      attempts: 1,
+      provider_message_id: "dry-run"
+    },
+    card_preview: {
+      title: "BTC 汇报卡片",
+      webhook_url: "https://example.invalid/redacted-webhook/secret-token",
+      content: "AI 已整理 BTC 上币事件。"
+    }
   };
 }

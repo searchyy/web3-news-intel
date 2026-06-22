@@ -141,7 +141,15 @@ class FeishuReportService:
                 status="duplicate",
             )
         self.session.commit()
-        result = await self._send(schedule.destination, preview.card, test_send=test_send)
+        try:
+            result = await self._send(schedule.destination, preview.card, test_send=test_send)
+        except Exception as exc:
+            result = FeishuSendResult(
+                ok=False,
+                status_code=getattr(exc, "status_code", None),
+                retry_after=_retry_after_from_exception(exc),
+                error=_sanitize_error(str(exc) or "Feishu report delivery failed"),
+            )
         if result.ok:
             repo.mark_delivered(
                 delivery,
@@ -542,3 +550,8 @@ def _db_datetime(session: Session, value: datetime) -> datetime:
     if bind is not None and bind.dialect.name == "sqlite":
         return value.replace(tzinfo=None)
     return value
+
+
+def _retry_after_from_exception(exc: BaseException) -> int | None:
+    value = getattr(exc, "retry_after", None)
+    return int(value) if isinstance(value, int) else None
