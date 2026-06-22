@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 RiskLevel = Literal["low", "medium", "high", "critical"]
 Sentiment = Literal["negative", "neutral", "positive", "mixed"]
+InputQuality = Literal["title_only", "summary", "excerpt", "multi_source"]
 
 
 class AIInsightOutput(BaseModel):
@@ -58,6 +59,12 @@ class AIInsightOutput(BaseModel):
         return self
 
 
+class AIEventExcerpt(BaseModel):
+    source_name: str | None = None
+    source_url: str
+    text: str
+
+
 class AIEventInput(BaseModel):
     event_id: int
     title: str
@@ -65,10 +72,13 @@ class AIEventInput(BaseModel):
     source_names: list[str] = Field(default_factory=list)
     published_at: str | None = None
     original_urls: list[str] = Field(default_factory=list)
+    source_urls: list[str] = Field(default_factory=list)
     category: str
     severity: str
     symbols: list[str] = Field(default_factory=list)
     chains: list[str] = Field(default_factory=list)
+    excerpts: list[AIEventExcerpt] = Field(default_factory=list)
+    input_quality: InputQuality = "title_only"
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 

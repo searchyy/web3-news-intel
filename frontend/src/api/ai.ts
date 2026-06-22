@@ -50,6 +50,21 @@ export function aiErrorMessage(error: unknown, fallback: string) {
   if (message.includes("DeepSeek API Key is not configured") || normalized.includes("api key is not configured")) {
     return "尚未配置 DeepSeek API Key，请先保存密钥后再获取模型或测试连接。";
   }
+  if (normalized.includes("redis")) {
+    return "Redis 不可用，AI 异步任务无法入队。请检查 Redis 服务后重试。";
+  }
+  if (normalized.includes("celery") || normalized.includes("worker")) {
+    return "Celery Worker 未运行，AI 任务不会被消费。请启动 Worker 后重试。";
+  }
+  if (normalized.includes("ai is disabled") || normalized.includes("ai disabled")) {
+    return "AI 功能未启用，请先在 AI 智能整理页面启用后再试。";
+  }
+  if (normalized.includes("insufficient input") || normalized.includes("input content")) {
+    return "输入内容不足，无法生成可靠摘要。请等待来源补充摘要或正文摘录后再试。";
+  }
+  if (normalized.includes("timeout") || normalized.includes("timed out")) {
+    return "AI 任务已超时，请稍后重试或检查 Worker 状态。";
+  }
   if (message.includes("CSRF")) {
     return "登录校验已失效，请刷新页面后重试。";
   }

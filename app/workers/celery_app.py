@@ -3,8 +3,15 @@ from __future__ import annotations
 from celery import Celery
 
 from app.core.config import settings
+from app.integrations.ai.runtime import get_ai_runtime_settings
 
-celery_app = Celery("web3_news_intel", broker=settings.redis_url, backend=settings.redis_url)
+ai_runtime_settings = get_ai_runtime_settings()
+
+celery_app = Celery(
+    "web3_news_intel",
+    broker=ai_runtime_settings.broker_url,
+    backend=ai_runtime_settings.result_backend,
+)
 celery_app.conf.update(
     task_serializer="json",
     result_serializer="json",
@@ -26,6 +33,9 @@ celery_app.conf.update(
     task_soft_time_limit=240,
     task_default_retry_delay=5,
     task_default_queue="web3-news-intel",
+    task_routes={
+        "app.workers.tasks_ai.*": {"queue": ai_runtime_settings.queue_name},
+    },
     beat_schedule={
         "poll-sources-every-minute": {
             "task": "app.workers.tasks_fetch.poll_sources",
@@ -34,6 +44,10 @@ celery_app.conf.update(
         "run-feishu-reports-every-minute": {
             "task": "app.workers.tasks_feishu_reports.run_due_feishu_reports",
             "schedule": 60.0,
+        },
+        "mark-stale-ai-jobs": {
+            "task": "app.workers.tasks_ai.mark_stale_ai_jobs",
+            "schedule": 30.0,
         },
     },
 )

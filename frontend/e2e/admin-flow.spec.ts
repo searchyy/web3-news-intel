@@ -90,7 +90,10 @@ test("mock 管理端搜索、AI 与飞书汇报流程", async ({ page }) => {
     }
     if (path === "/api/admin/events/ai-summary-batch" && method === "POST") {
       aiSummaryRequests += 1;
-      return route.fulfill({ json: { task_id: "mock-ai-task", status: "queued" } });
+      return route.fulfill({ status: 202, json: { job_id: "mock-ai-task", status: "queued", event_ids: [1] } });
+    }
+    if (path === "/api/admin/ai/jobs/mock-ai-task" && method === "GET") {
+      return route.fulfill({ json: { job_id: "mock-ai-task", status: "succeeded", event_ids: [1] } });
     }
     if (path === "/api/admin/ai/providers/deepseek" && method === "GET") {
       return route.fulfill({

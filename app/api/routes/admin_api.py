@@ -5,12 +5,13 @@ import importlib
 import time
 import uuid
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from celery.result import AsyncResult
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Session, object_session, selectinload
 
 from app.core.admin_auth import (
     AdminPrincipal,
@@ -25,7 +26,7 @@ from app.core.admin_auth import (
 )
 from app.core.config import load_runtime_sources, settings
 from app.core.field_encryption import FieldEncryptor
-from app.core.time import utc_now
+from app.core.time import ensure_utc, utc_now
 from app.db.models import (
     AdminAuditLog,
     AIRun,
@@ -43,10 +44,21 @@ from app.db.repositories.source_repo import SourceRepository
 from app.db.repositories.system_config_repo import SystemConfigRepository
 from app.db.session import get_session
 from app.integrations.ai.deepseek.errors import AIProviderError
+from app.integrations.ai.runtime import (
+    AIRuntimeError,
+    get_ai_runtime_settings,
+    require_sync_allowed,
+)
+from app.integrations.ai.runtime import (
+    ai_runtime_status as get_ai_runtime_status,
+)
 from app.integrations.ai.service import (
     AIService,
+    mark_stale_ai_run,
+    mark_stale_ai_runs,
     provider_config_to_public_dict,
     sanitize_error,
+    summarize_event_sync,
 )
 from app.integrations.feishu.client import FeishuClient, validate_feishu_webhook_url
 from app.integrations.feishu.errors import FeishuAuthenticationError
@@ -77,12 +89,16 @@ from app.schemas.admin import (
 )
 from app.schemas.ai import (
     AIBatchSummaryRequest,
+    AIJobCancelResponse,
+    AIJobCreateResponse,
+    AIJobRead,
+    AIJobRetryResponse,
     AIModelRead,
     AIProviderConfigRead,
     AIProviderConfigWrite,
-    AIQueuedTask,
     AIRunPage,
     AIRunRead,
+    AIRuntimeStatus,
     AISummaryRequest,
     AITaskStatus,
     AITestResult,
@@ -119,6 +135,9 @@ class _UnavailableTask:
     id = "ai-unavailable"
 
     def delay(self, *_args, **_kwargs):
+        raise HTTPException(status_code=503, detail="AI task service unavailable")
+
+    def apply_async(self, *_args, **_kwargs):
         raise HTTPException(status_code=503, detail="AI task service unavailable")
 
 
@@ -978,6 +997,8 @@ def list_ai_runs(
 ) -> AIRunPage:
     actual_limit = limit or page_size
     actual_offset = offset if offset is not None else (page - 1) * page_size
+    if mark_stale_ai_runs(session):
+        session.commit()
     stmt = select(AIRun).order_by(AIRun.created_at.desc())
     total = int(session.scalar(select(func.count()).select_from(AIRun)) or 0)
     rows = session.scalars(stmt.offset(actual_offset).limit(actual_limit))
@@ -989,37 +1010,149 @@ def list_ai_runs(
     )
 
 
-@router.post("/events/{event_id}/ai-summary", response_model=AIQueuedTask)
+@router.post(
+    "/events/{event_id}/ai-summary",
+    response_model=AIJobCreateResponse | EventAIInsightRead,
+)
 def queue_event_ai_summary(
     event_id: int,
     payload: AISummaryRequest,
+    response: Response,
     request: Request,
     _: None = Depends(require_csrf),
     principal: AdminPrincipal = Depends(require_admin_session),
     session: Session = Depends(get_session),
-) -> AIQueuedTask:
+) -> AIJobCreateResponse | EventAIInsightRead:
     if session.get(Event, event_id) is None:
         raise HTTPException(status_code=404, detail="event not found")
-    task = summarize_event_task.delay(event_id, force=payload.force, auto=False)
-    _audit(session, principal, request, "run", "event_ai_summary", str(event_id), {})
+    _ensure_ai_config_ready(session)
+    runtime_settings = get_ai_runtime_settings()
+    mode = runtime_settings.execution_mode
+    if mode == "sync":
+        try:
+            require_sync_allowed()
+        except AIRuntimeError as exc:
+            raise HTTPException(status_code=503, detail=sanitize_error(exc)) from exc
+        try:
+            insight = summarize_event_sync(
+                session,
+                event_id,
+                force=payload.force,
+                auto=False,
+                timeout_seconds=runtime_settings.sync_timeout_seconds,
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=sanitize_error(exc)) from exc
+        _audit(session, principal, request, "run", "event_ai_summary_sync", str(event_id), {})
+        session.commit()
+        return EventAIInsightRead.model_validate(insight)
+
+    runtime = _ai_runtime_status()
+    if not runtime.redis_available:
+        raise HTTPException(
+            status_code=503,
+            detail=runtime.error or "Redis 不可用，AI 任务无法入队",
+        )
+    if not runtime.worker_available:
+        raise HTTPException(status_code=503, detail="Celery Worker 未运行，AI 任务无法执行")
+
+    job = _create_ai_job(session, [event_id], job_type="summarize_event")
+    task_id = uuid.uuid4().hex
+    job.task_id = task_id
     session.commit()
-    return AIQueuedTask(queued=True, task_id=task.id, event_id=event_id)
+    try:
+        summarize_event_task.apply_async(
+            args=[job.id, event_id],
+            kwargs={"force": payload.force, "auto": False},
+            queue=runtime.queue_name,
+            task_id=task_id,
+        )
+    except Exception as exc:
+        _fail_ai_job(job, "ai_enqueue_failed", sanitize_error(exc))
+        _audit(
+            session,
+            principal,
+            request,
+            "run",
+            "event_ai_summary",
+            str(event_id),
+            {"status": "enqueue_failed"},
+        )
+        session.commit()
+        raise HTTPException(status_code=503, detail="AI 任务入队失败，请检查 Redis/Celery") from exc
+    _audit(
+        session,
+        principal,
+        request,
+        "run",
+        "event_ai_summary",
+        str(event_id),
+        {"job_id": job.id, "task_id": task_id},
+    )
+    session.commit()
+    response.status_code = status.HTTP_202_ACCEPTED
+    return AIJobCreateResponse(
+        queued=True,
+        job_id=job.id,
+        task_id=task_id,
+        event_id=event_id,
+        event_ids=[event_id],
+        status="queued",
+        poll_url=f"/api/admin/ai/jobs/{job.id}",
+    )
 
 
-@router.post("/events/ai-summary-batch", response_model=AIQueuedTask)
+@router.post("/events/ai-summary-batch", response_model=AIJobCreateResponse)
 def queue_event_ai_summary_batch(
     payload: AIBatchSummaryRequest,
+    response: Response,
     request: Request,
     _: None = Depends(require_csrf),
     principal: AdminPrincipal = Depends(require_admin_session),
     session: Session = Depends(get_session),
-) -> AIQueuedTask:
+) -> AIJobCreateResponse:
     existing_count = int(
         session.scalar(select(func.count(Event.id)).where(Event.id.in_(payload.event_ids))) or 0
     )
     if existing_count != len(set(payload.event_ids)):
         raise HTTPException(status_code=404, detail="one or more events not found")
-    task = summarize_event_batch_task.delay(payload.event_ids, force=payload.force, auto=False)
+    _ensure_ai_config_ready(session)
+    runtime = _ai_runtime_status()
+    if not runtime.redis_available:
+        raise HTTPException(
+            status_code=503,
+            detail=runtime.error or "Redis 不可用，AI 任务无法入队",
+        )
+    if not runtime.worker_available:
+        raise HTTPException(status_code=503, detail="Celery Worker 未运行，AI 任务无法执行")
+    event_ids = [int(item) for item in payload.event_ids]
+    job = _create_ai_job(session, event_ids, job_type="summarize_event_batch")
+    task_id = uuid.uuid4().hex
+    job.task_id = task_id
+    session.commit()
+    try:
+        summarize_event_batch_task.apply_async(
+            args=[job.id, event_ids],
+            kwargs={"force": payload.force, "auto": False},
+            queue=runtime.queue_name,
+            task_id=task_id,
+        )
+    except Exception as exc:
+        _fail_ai_job(job, "ai_enqueue_failed", sanitize_error(exc))
+        _audit(
+            session,
+            principal,
+            request,
+            "run",
+            "event_ai_summary_batch",
+            None,
+            {"status": "enqueue_failed", "event_count": len(event_ids)},
+        )
+        session.commit()
+        raise HTTPException(
+            status_code=503,
+            detail="AI 批量任务入队失败，请检查 Redis/Celery",
+        ) from exc
     _audit(
         session,
         principal,
@@ -1027,10 +1160,19 @@ def queue_event_ai_summary_batch(
         "run",
         "event_ai_summary_batch",
         None,
-        {"event_count": len(payload.event_ids)},
+        {"job_id": job.id, "task_id": task_id, "event_count": len(event_ids)},
     )
     session.commit()
-    return AIQueuedTask(queued=True, task_id=task.id, event_ids=payload.event_ids)
+    response.status_code = status.HTTP_202_ACCEPTED
+    return AIJobCreateResponse(
+        queued=True,
+        job_id=job.id,
+        task_id=task_id,
+        event_id=event_ids[0],
+        event_ids=event_ids,
+        status="queued",
+        poll_url=f"/api/admin/ai/jobs/{job.id}",
+    )
 
 
 @router.get("/events/{event_id}/ai-insight", response_model=EventAIInsightRead)
@@ -1043,6 +1185,144 @@ def get_event_ai_insight(
     if insight is None:
         raise HTTPException(status_code=404, detail="AI insight not found")
     return EventAIInsightRead.model_validate(insight)
+
+
+@router.get("/ai/jobs/{job_id}", response_model=AIJobRead)
+def get_ai_job(
+    job_id: int,
+    _: AdminPrincipal = Depends(require_admin_session),
+    session: Session = Depends(get_session),
+) -> AIJobRead:
+    job = _ai_job_or_404(session, job_id)
+    mark_stale_ai_run(job)
+    session.commit()
+    return _ai_job_to_read(job)
+
+
+@router.post("/ai/jobs/{job_id}/retry", response_model=AIJobRetryResponse)
+def retry_ai_job(
+    job_id: int,
+    request: Request,
+    _: None = Depends(require_csrf),
+    principal: AdminPrincipal = Depends(require_admin_session),
+    session: Session = Depends(get_session),
+) -> AIJobRetryResponse:
+    job = _ai_job_or_404(session, job_id)
+    if job.status not in {"failed", "cancelled"}:
+        raise HTTPException(status_code=409, detail="AI 任务仍在执行或已完成，不能重复重试")
+    event_ids = _ai_job_event_ids(job)
+    if not event_ids:
+        raise HTTPException(status_code=400, detail="AI 任务缺少可重试的事件")
+    runtime = _ai_runtime_status()
+    if not runtime.redis_available:
+        raise HTTPException(
+            status_code=503,
+            detail=runtime.error or "Redis 不可用，AI 任务无法入队",
+        )
+    if not runtime.worker_available:
+        raise HTTPException(status_code=503, detail="Celery Worker 未运行，AI 任务无法执行")
+    task_id = uuid.uuid4().hex
+    result = session.execute(
+        update(AIRun)
+        .where(AIRun.id == job.id, AIRun.status.in_(["failed", "cancelled"]))
+        .values(
+            status="queued",
+            queued_at=utc_now(),
+            started_at=None,
+            retry_count=func.coalesce(AIRun.retry_count, 0) + 1,
+            finished_at=None,
+            error_code=None,
+            error_sanitized=None,
+            error_message_sanitized=None,
+            task_id=task_id,
+            worker_name=None,
+            queue_wait_ms=None,
+            provider_latency_ms=None,
+            total_latency_ms=None,
+        )
+        .execution_options(synchronize_session=False)
+    )
+    if result.rowcount != 1:
+        session.refresh(job)
+        raise HTTPException(
+            status_code=409,
+            detail="AI 浠诲姟鐘舵€佸凡鍙樺寲锛岃鍒锋柊鍚庡啀閲嶈瘯",
+        )
+    session.commit()
+    session.refresh(job)
+    try:
+        if job.job_type == "summarize_event_batch":
+            summarize_event_batch_task.apply_async(
+                args=[job.id, event_ids],
+                kwargs={"force": True, "auto": False},
+                queue=runtime.queue_name,
+                task_id=task_id,
+            )
+        else:
+            summarize_event_task.apply_async(
+                args=[job.id, event_ids[0]],
+                kwargs={"force": True, "auto": False},
+                queue=runtime.queue_name,
+                task_id=task_id,
+            )
+    except Exception as exc:
+        _fail_ai_job(job, "ai_enqueue_failed", sanitize_error(exc))
+        session.commit()
+        raise HTTPException(
+            status_code=503,
+            detail="AI 任务重新入队失败，请检查 Redis/Celery",
+        ) from exc
+    _audit(
+        session,
+        principal,
+        request,
+        "retry",
+        "ai_job",
+        str(job_id),
+        {"task_id": task_id},
+    )
+    session.commit()
+    return AIJobRetryResponse(
+        queued=True,
+        job_id=job.id,
+        task_id=task_id,
+        status="queued",
+        poll_url=f"/api/admin/ai/jobs/{job.id}",
+    )
+
+
+@router.post("/ai/jobs/{job_id}/cancel", response_model=AIJobCancelResponse)
+def cancel_ai_job(
+    job_id: int,
+    request: Request,
+    _: None = Depends(require_csrf),
+    principal: AdminPrincipal = Depends(require_admin_session),
+    session: Session = Depends(get_session),
+) -> AIJobCancelResponse:
+    job = _ai_job_or_404(session, job_id)
+    task_id = job.task_id
+    if job.status == "cancelled":
+        return AIJobCancelResponse(cancelled=True, job_id=job.id, status="cancelled")
+    result = session.execute(
+        update(AIRun)
+        .where(AIRun.id == job.id, AIRun.status.in_(_ACTIVE_AI_JOB_STATUSES))
+        .values(
+            status="cancelled",
+            finished_at=utc_now(),
+            error_code=None,
+            error_message_sanitized=None,
+        )
+        .execution_options(synchronize_session=False)
+    )
+    if result.rowcount != 1:
+        session.refresh(job)
+        raise HTTPException(status_code=409, detail="AI 任务已结束，不能取消")
+    session.refresh(job)
+    if task_id:
+        cancel_ai_task(task_id)
+    _audit(session, principal, request, "cancel", "ai_job", str(job_id), {"task_id": task_id})
+    session.commit()
+    return AIJobCancelResponse(cancelled=True, job_id=job.id, status="cancelled")
 
 
 @router.get("/ai/tasks/{task_id}", response_model=AITaskStatus)
@@ -1359,6 +1639,11 @@ def system_health(_: AdminPrincipal = Depends(require_admin_session)) -> dict:
     return {"api": "ok", "postgresql": "configured", "redis": "configured", "celery": "configured"}
 
 
+@router.get("/system/ai-runtime", response_model=AIRuntimeStatus)
+def ai_runtime_status(_: AdminPrincipal = Depends(require_admin_session)) -> AIRuntimeStatus:
+    return _ai_runtime_status()
+
+
 @router.get("/system/queues")
 def system_queues(_: AdminPrincipal = Depends(require_admin_session)) -> dict:
     return {"queues": [{"name": "web3-news-intel", "depth": None}]}
@@ -1451,6 +1736,130 @@ def _event_search_params(
         page=page,
         page_size=page_size,
     )
+
+
+_AI_JOB_STATUSES = {"queued", "started", "retrying", "succeeded", "failed", "cancelled"}
+_ACTIVE_AI_JOB_STATUSES = {"queued", "started", "retrying"}
+
+
+def _ensure_ai_config_ready(session: Session) -> None:
+    config = AIService(session).get_or_create_provider_config("deepseek")
+    if not config.enabled:
+        raise HTTPException(status_code=400, detail="AI 功能未启用")
+    if not config.api_key_ciphertext:
+        raise HTTPException(status_code=400, detail="DeepSeek 未配置 API Key")
+    if not config.model:
+        raise HTTPException(status_code=400, detail="DeepSeek 未配置模型")
+
+
+def _ai_runtime_status() -> AIRuntimeStatus:
+    runtime = get_ai_runtime_status(celery_app=celery_app)
+    return AIRuntimeStatus(
+        execution_mode=runtime.execution_mode,  # type: ignore[arg-type]
+        sync_allowed=runtime.sync_allowed,
+        redis_available=runtime.redis_ok,
+        worker_available=runtime.worker_ok,
+        queue_name=runtime.queue_name,
+        status="ready" if runtime.ready else "degraded",
+        error=runtime.detail,
+    )
+
+
+def _create_ai_job(session: Session, event_ids: list[int], *, job_type: str) -> AIRun:
+    config = AIService(session).get_or_create_provider_config("deepseek")
+    normalized_event_ids = [int(item) for item in event_ids]
+    job = AIRun(
+        job_type=job_type,
+        provider=config.provider,
+        model=config.model,
+        event_count=len(normalized_event_ids),
+        event_ids=normalized_event_ids,
+        status="queued",
+        queued_at=utc_now(),
+    )
+    session.add(job)
+    session.flush()
+    return job
+
+
+def _ai_job_or_404(session: Session, job_id: int) -> AIRun:
+    job = session.get(AIRun, job_id)
+    if job is None or job.job_type not in {"summarize_event", "summarize_event_batch"}:
+        raise HTTPException(status_code=404, detail="AI 任务不存在")
+    return job
+
+
+def _fail_ai_job(job: AIRun, code: str, message: str) -> None:
+    job.status = "failed"
+    job.error_code = code
+    job.error_sanitized = message
+    job.error_message_sanitized = message
+    job.finished_at = job.finished_at or utc_now()
+    started = ensure_utc(job.queued_at or job.created_at)
+    if started:
+        job.total_latency_ms = max(0, int((job.finished_at - started).total_seconds() * 1000))
+        job.latency_ms = job.total_latency_ms
+
+
+def _ai_job_to_read(job: AIRun) -> AIJobRead:
+    status_value = _normalize_ai_job_status(job.status)
+    event_ids = _ai_job_event_ids(job)
+    event_id = event_ids[0] if event_ids else None
+    insight_payload: dict[str, Any] | None = None
+    input_quality: str | None = None
+    if event_id is not None and status_value == "succeeded":
+        session = object_session(job)
+        if session is not None:
+            insight = AIService(session).latest_insight(event_id)
+            if insight is not None:
+                insight_read = EventAIInsightRead.model_validate(insight)
+                insight_payload = insight_read.model_dump(mode="json")
+                input_quality = insight_read.input_quality
+    return AIJobRead(
+        job_id=job.id,
+        status=status_value,
+        job_type=job.job_type,
+        provider=job.provider,
+        model=job.model,
+        event_id=event_id,
+        event_ids=event_ids,
+        task_id=job.task_id,
+        worker_name=job.worker_name,
+        retry_count=job.retry_count,
+        queued_at=job.queued_at or job.created_at,
+        started_at=job.started_at,
+        finished_at=job.finished_at,
+        queue_wait_ms=job.queue_wait_ms,
+        provider_latency_ms=job.provider_latency_ms,
+        total_latency_ms=job.total_latency_ms,
+        error_code=job.error_code,
+        error_message_sanitized=job.error_message_sanitized or job.error_sanitized,
+        input_quality=input_quality,
+        insight=insight_payload,
+    )
+
+
+def _normalize_ai_job_status(value: str) -> str:
+    normalized = {
+        "running": "started",
+        "success": "succeeded",
+        "budget_rejected": "failed",
+    }.get(value, value)
+    if normalized not in _AI_JOB_STATUSES:
+        return "failed"
+    return normalized
+
+
+def _coerce_int(value: Any) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _ai_job_event_ids(job: AIRun) -> list[int]:
+    values = job.event_ids if isinstance(job.event_ids, list) else []
+    return [int(item) for item in values if _coerce_int(item) is not None]
 
 
 def _sync_runtime_sources(session: Session) -> None:
