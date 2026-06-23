@@ -148,7 +148,82 @@ describe("飞书群组与汇报页面", () => {
       expect(requests).toContain("POST /api/admin/report-schedules/7/test-send")
     );
   });
+
+  it("可以从飞书页面创建默认停用的即时通知规则", async () => {
+    const requests: Array<{ method: string; url: string; body?: Record<string, unknown> }> = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      const url = String(input);
+      requests.push({ method: init?.method ?? "GET", url, body: parseBody(init) });
+      if (url.includes("/api/admin/auth/me")) {
+        return Promise.resolve(json({ authenticated: true, username: "admin", csrf_token: "csrf" }));
+      }
+      if (url.endsWith("/api/admin/destinations")) {
+        return Promise.resolve(
+          json([
+            {
+              id: "00000000-0000-0000-0000-000000000001",
+              key: "feishu-test",
+              name: "测试飞书群",
+              provider: "feishu_webhook",
+              enabled: true,
+              status: "active",
+              chat_name: "测试飞书群"
+            }
+          ])
+        );
+      }
+      if (url.endsWith("/api/admin/report-schedules") || url.endsWith("/api/admin/saved-searches")) {
+        return Promise.resolve(json([]));
+      }
+      if (url.endsWith("/api/admin/rules")) {
+        return Promise.resolve(
+          json({
+            id: "11111111-1111-1111-1111-111111111111",
+            destination_id: "00000000-0000-0000-0000-000000000001",
+            name: "高风险事件即时通知",
+            enabled: false,
+            minimum_severity: "high",
+            categories: [],
+            sources: [],
+            symbols: [],
+            chains: [],
+            delivery_mode: "immediate",
+            timezone: "UTC",
+            maximum_messages_per_hour: 30,
+            critical_bypass_quiet_hours: false
+          })
+        );
+      }
+      return Promise.resolve(json({}));
+    });
+
+    renderPage();
+
+    await screen.findByText("飞书群组与汇报");
+    await userEvent.click(screen.getByRole("button", { name: /创建即时通知规则/ }));
+    await userEvent.type(screen.getByPlaceholderText("例如：高风险事件即时通知"), "高风险事件即时通知");
+    await userEvent.click(screen.getByRole("button", { name: "创建规则" }));
+
+    await waitFor(() =>
+      expect(requests.some((request) => request.method === "POST" && request.url === "/api/admin/rules")).toBe(true)
+    );
+    const body = requests.find((request) => request.method === "POST" && request.url === "/api/admin/rules")?.body;
+    expect(body).toMatchObject({
+      destination_id: "00000000-0000-0000-0000-000000000001",
+      name: "高风险事件即时通知",
+      enabled: false,
+      minimum_severity: "high",
+      delivery_mode: "immediate"
+    });
+  });
 });
+
+function parseBody(init?: RequestInit) {
+  if (typeof init?.body !== "string") {
+    return undefined;
+  }
+  return JSON.parse(init.body) as Record<string, unknown>;
+}
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {

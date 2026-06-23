@@ -1262,7 +1262,7 @@ def retry_ai_job(
         session.refresh(job)
         raise HTTPException(
             status_code=409,
-            detail="AI 浠诲姟鐘舵€佸凡鍙樺寲锛岃鍒锋柊鍚庡啀閲嶈瘯",
+            detail="AI 任务状态已变化，请刷新后再重试",
         )
     session.commit()
     session.refresh(job)
@@ -1546,9 +1546,12 @@ def create_rule(
     principal: AdminPrincipal = Depends(require_admin_session),
     session: Session = Depends(get_session),
 ) -> RuleRead:
-    if session.get(NotificationDestination, payload.destination_id) is None:
-        raise HTTPException(status_code=404, detail="destination not found")
+    destination = session.get(NotificationDestination, payload.destination_id)
+    if destination is None:
+        raise HTTPException(status_code=404, detail="通知目标不存在")
     rule = NotificationRule(**payload.model_dump())
+    if rule.enabled:
+        destination.activated_at = utc_now()
     session.add(rule)
     session.flush()
     _audit(session, principal, request, "create", "rule", str(rule.id), {})
@@ -1571,6 +1574,8 @@ def patch_rule(
     update = payload.model_dump(exclude_unset=True)
     for field, value in update.items():
         setattr(rule, field, value)
+    if update.get("enabled") is True and rule.destination:
+        rule.destination.activated_at = utc_now()
     _audit(session, principal, request, "update", "rule", str(rule_id), {"fields": list(update)})
     session.commit()
     return RuleRead.model_validate(rule)

@@ -5,7 +5,7 @@ import { ConfigProvider, message } from "antd";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AuthProvider } from "../src/auth/AuthContext";
 import { AiSettingsPage } from "../src/pages/AiSettingsPage";
-import type { AiModelsResponse, AiProviderConfig } from "../src/types/api";
+import type { AiModelsResponse, AiProviderConfig, AiRuntimeStatus } from "../src/types/api";
 
 type RequestRecord = {
   method: string;
@@ -224,10 +224,29 @@ describe("AI 智能整理配置", () => {
       )
     );
   });
+
+  it("同步开发模式下提示生成需要等待模型返回", async () => {
+    mockAiFetch({
+      config: baseConfig(),
+      runtime: {
+        execution_mode: "sync",
+        sync_allowed: true,
+        redis_available: false,
+        worker_available: false,
+        queue_name: "ai",
+        status: "ready"
+      }
+    });
+
+    renderPage();
+
+    expect(await screen.findByText("当前为同步开发模式，生成需要等待模型返回。")).toBeInTheDocument();
+  });
 });
 
 function mockAiFetch(options: {
   config: AiProviderConfig;
+  runtime?: AiRuntimeStatus;
   models?: AiModelsResponse;
   onModels?: () => Response;
   onSave?: (body: Record<string, unknown>) => Response;
@@ -246,6 +265,20 @@ function mockAiFetch(options: {
     }
     if (url.includes("/api/admin/ai/runs")) {
       return Promise.resolve(json({ items: [], total: 0, page: 1, page_size: 10 }));
+    }
+    if (url.includes("/api/admin/system/ai-runtime")) {
+      return Promise.resolve(
+        json(
+          options.runtime ?? {
+            execution_mode: "async",
+            sync_allowed: true,
+            redis_available: true,
+            worker_available: true,
+            queue_name: "ai",
+            status: "ready"
+          }
+        )
+      );
     }
     if (url.includes("/api/admin/ai/providers/deepseek/models")) {
       return Promise.resolve(options.onModels?.() ?? json(options.models ?? { models: [] }));

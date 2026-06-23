@@ -132,10 +132,14 @@ export type AiSummarySubmitResponse = AiJob | EventAiInsight;
 
 export type AiRuntimeStatus = {
   mode?: "sync" | "async" | string;
+  execution_mode?: "sync" | "async" | string;
   status?: "healthy" | "degraded" | "unavailable" | string;
+  sync_allowed?: boolean;
   redis_available?: boolean;
   worker_available?: boolean;
   worker_heartbeat_at?: string | null;
+  queue_name?: string;
+  error?: string | null;
   message?: string | null;
   error_sanitized?: string | null;
 };

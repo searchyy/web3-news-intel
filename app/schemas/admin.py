@@ -96,7 +96,7 @@ class DestinationRead(BaseModel):
 
 class RuleBase(BaseModel):
     name: str
-    enabled: bool = True
+    enabled: bool = False
     minimum_severity: str = Field(default="normal", pattern="^(low|normal|high|critical)$")
     categories: list[str] = Field(default_factory=list)
     sources: list[str] = Field(default_factory=list)
