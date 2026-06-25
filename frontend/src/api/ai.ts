@@ -44,6 +44,13 @@ export function aiErrorMessage(error: unknown, fallback: string) {
   const message = error instanceof Error ? error.message : String(error || "");
   const normalized = message.toLowerCase();
 
+  if (normalized.includes("daily token budget") || normalized.includes("token budget") || normalized.includes("ai_budget_exceeded")) {
+    return "?? AI Token ???????? AI ?????????? Token ????? UTC 0 ?????";
+  }
+  if (normalized.includes("daily request budget") || normalized.includes("request budget")) {
+    return "?? AI ?????????? AI ????????????????? UTC 0 ?????";
+  }
+
   if (message.includes("FIELD_ENCRYPTION_KEY")) {
     return "后端缺少 FIELD_ENCRYPTION_KEY，无法加密保存 DeepSeek Key。请配置后端环境变量并重启服务后再保存。";
   }

@@ -30,7 +30,7 @@ class EventSearchParams(BaseModel):
     published_to: datetime | None = None
     first_seen_from: datetime | None = None
     first_seen_to: datetime | None = None
-    sort: SortField = "published_at"
+    sort: SortField = "first_seen_at"
     direction: SortDirection = "desc"
     page: int = Field(default=1, ge=1)
     page_size: int = Field(default=50, ge=1, le=200)

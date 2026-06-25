@@ -93,7 +93,7 @@ const GENERIC_STATUS_LABELS: Record<EventPipelineStatus, string> = {
   cancelled: "已取消",
   sending: "发送中",
   delivered: "已送达",
-  dry_run: "Dry-run 未实发",
+  dry_run: "未实发",
   suppressed: "已抑制"
 };
 
@@ -111,7 +111,7 @@ const FEISHU_STATUS_LABELS: Partial<Record<EventPipelineStatus, string>> = {
   sending: "发送中",
   delivered: "已送达",
   failed: "发送失败",
-  dry_run: "Dry-run 未实发",
+  dry_run: "未实发",
   suppressed: "已抑制"
 };
 

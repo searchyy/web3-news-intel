@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from bs4 import BeautifulSoup
@@ -50,6 +51,12 @@ def _parse_css_listing(
         url_node = node.select_one(str(url_selector)) if url_selector else node
         summary_node = node.select_one(str(summary_selector)) if summary_selector else None
         date_node = node.select_one(str(date_selector)) if date_selector else None
+        published_text = date_node.get_text(" ", strip=True) if date_node else None
+        if not published_text:
+            published_text = _regex_date_text(
+                node.get_text(" ", strip=True),
+                source.config.get("date_regex"),
+            )
         href = url_node.get("href") if hasattr(url_node, "get") and url_node else None
         item = build_normalized_item(
             source=source,
@@ -57,9 +64,7 @@ def _parse_css_listing(
             title=title_node.get_text(" ", strip=True) if title_node else None,
             url=href,
             summary=summary_node.get_text(" ", strip=True) if summary_node else None,
-            published_at=parse_exchange_datetime(
-                date_node.get_text(" ", strip=True) if date_node else None
-            ),
+            published_at=parse_exchange_datetime(published_text),
             parser_name=str(source.config.get("parser", "exchange_html")),
             parser_version=parser_version,
         )
@@ -68,6 +73,22 @@ def _parse_css_listing(
         if len(items) >= limit:
             break
     return dedupe_items(items)
+
+
+def _regex_date_text(text: str, pattern: object) -> str | None:
+    if not pattern:
+        return None
+    try:
+        match = re.search(str(pattern), text)
+    except re.error:
+        return None
+    if match is None:
+        return None
+    if "date" in match.groupdict():
+        return match.group("date")
+    if match.groups():
+        return match.group(1)
+    return match.group(0)
 
 
 def _parse_app_state(

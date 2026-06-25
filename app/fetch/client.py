@@ -162,28 +162,37 @@ class FetchClient:
             try:
                 while True:
                     await self.rate_limiter.wait(current_url)
-                    response = await self.client.request(method, current_url, **kwargs)
-                    self._raise_for_terminal_status(response)
-                    self._raise_for_size(response)
-                    if not response.is_redirect:
+                    request = self.client.build_request(method, current_url, **kwargs)
+                    response = await self.client.send(request, stream=True, follow_redirects=False)
+                    close_response = True
+                    try:
+                        self._raise_for_terminal_status(response)
+                        self._raise_for_declared_size(response)
+                        if self._is_redirect_response(response):
+                            redirects_seen += 1
+                            if redirects_seen > self.max_redirects:
+                                raise FetchError(
+                                    "maximum redirect count exceeded", error_code="redirect_loop"
+                                )
+                            location = response.headers.get("Location")
+                            if not location:
+                                raise FetchError(
+                                    "redirect missing Location header", error_code="bad_redirect"
+                                )
+                            current_url = normalize_redirect_url(str(response.url), location)
+                            validate_public_http_url(
+                                current_url,
+                                allow_private_networks=self.allow_private_networks,
+                                allow_localhost=self.allow_localhost,
+                                resolve_dns=resolve_dns,
+                            )
+                            continue
+                        await self._read_limited_response_body(response)
+                        close_response = False
                         break
-                    redirects_seen += 1
-                    if redirects_seen > self.max_redirects:
-                        raise FetchError(
-                            "maximum redirect count exceeded", error_code="redirect_loop"
-                        )
-                    location = response.headers.get("Location")
-                    if not location:
-                        raise FetchError(
-                            "redirect missing Location header", error_code="bad_redirect"
-                        )
-                    current_url = normalize_redirect_url(str(response.url), location)
-                    validate_public_http_url(
-                        current_url,
-                        allow_private_networks=self.allow_private_networks,
-                        allow_localhost=self.allow_localhost,
-                        resolve_dns=resolve_dns,
-                    )
+                    finally:
+                        if close_response:
+                            await response.aclose()
                 if response.status_code in TRANSIENT_STATUS_CODES and attempt <= self.max_retries:
                     delay = parse_retry_after(response.headers.get("Retry-After"))
                     if delay is None:
@@ -197,24 +206,28 @@ class FetchClient:
                         delay_seconds=delay,
                     )
                     fetch_retries_total.labels(method=method, reason="http_status").inc()
+                    await response.aclose()
                     await asyncio.sleep(delay)
                     continue
-                if response.status_code >= 400:
-                    raise FetchError(
-                        f"HTTP {response.status_code} while fetching {redact_url(current_url)}",
-                        status_code=response.status_code,
-                        error_code="http_error",
+                try:
+                    if response.status_code >= 400:
+                        raise FetchError(
+                            f"HTTP {response.status_code} while fetching {redact_url(current_url)}",
+                            status_code=response.status_code,
+                            error_code="http_error",
+                        )
+                    self._raise_for_content_type(response, allowed_content_types)
+                    fetch_results_total.labels(
+                        method=method,
+                        outcome="success",
+                        status_group=status_group(response.status_code),
+                    ).inc()
+                    fetch_duration_seconds.labels(method=method, outcome="success").observe(
+                        time.perf_counter() - started
                     )
-                self._raise_for_content_type(response, allowed_content_types)
-                fetch_results_total.labels(
-                    method=method,
-                    outcome="success",
-                    status_group=status_group(response.status_code),
-                ).inc()
-                fetch_duration_seconds.labels(method=method, outcome="success").observe(
-                    time.perf_counter() - started
-                )
-                return self._to_fetch_response(response)
+                    return self._to_fetch_response(response)
+                finally:
+                    await response.aclose()
             except (httpx.TimeoutException, httpx.TransportError) as exc:
                 last_error = exc
                 if attempt > self.max_retries:
@@ -243,7 +256,10 @@ class FetchClient:
         if response.status_code in {401, 403}:
             raise AccessDeniedError(status_code=response.status_code)
 
-    def _raise_for_size(self, response: httpx.Response) -> None:
+    def _is_redirect_response(self, response: httpx.Response) -> bool:
+        return response.status_code in {301, 302, 303, 307, 308}
+
+    def _raise_for_declared_size(self, response: httpx.Response) -> None:
         content_length = response.headers.get("Content-Length")
         if (
             content_length
@@ -251,8 +267,17 @@ class FetchClient:
             and int(content_length) > self.max_response_bytes
         ):
             raise ResponseTooLargeError(self.max_response_bytes)
-        if len(response.content) > self.max_response_bytes:
-            raise ResponseTooLargeError(self.max_response_bytes)
+
+    async def _read_limited_response_body(self, response: httpx.Response) -> None:
+        chunks: list[bytes] = []
+        total_bytes = 0
+        async for chunk in response.aiter_bytes(chunk_size=64 * 1024):
+            remaining_bytes = self.max_response_bytes - total_bytes
+            if len(chunk) > remaining_bytes:
+                raise ResponseTooLargeError(self.max_response_bytes)
+            chunks.append(chunk)
+            total_bytes += len(chunk)
+        response._content = b"".join(chunks)
 
     def _raise_for_content_type(
         self,

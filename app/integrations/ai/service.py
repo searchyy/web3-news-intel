@@ -57,6 +57,7 @@ from app.integrations.ai.settings import (
     ai_settings,
     validate_deepseek_api_base,
 )
+from app.pipeline.scoring import event_priority_score
 
 MASKED_KEY_PREFIXES = ("****", "sha256:")
 ACTIVE_JOB_STATUSES = {"queued", "started", "retrying"}
@@ -231,8 +232,8 @@ class AIService:
         event = self._event_or_none(event_id)
         if event is None:
             raise AIConfigurationError("event not found")
-        if auto and not _severity_allowed(event.severity, row.auto_minimum_severity):
-            raise AIConfigurationError("event severity is below auto minimum")
+        if auto and not auto_event_allowed(event, row):
+            raise AIConfigurationError("event severity and priority are below auto minimum")
 
         template = self.ensure_default_prompt_template()
         event_input = build_event_input(event)
@@ -862,6 +863,24 @@ def _sanitize_metadata(value: Any, *, depth: int = 0) -> Any:
 
 def _truncate(value: str, limit: int = 1500) -> str:
     return value if len(value) <= limit else value[:limit] + "...[truncated]"
+
+
+def auto_event_allowed(event: Event, row: AIProviderConfig) -> bool:
+    if _severity_allowed(event.severity, row.auto_minimum_severity):
+        return True
+    minimum_priority = _auto_minimum_priority_score(row)
+    if minimum_priority <= 0:
+        return False
+    return event_priority_score(event) >= minimum_priority
+
+
+def _auto_minimum_priority_score(row: AIProviderConfig) -> int:
+    config = row.config or {}
+    value = config.get("auto_minimum_priority_score", 85)
+    try:
+        return max(0, min(100, int(value)))
+    except (TypeError, ValueError):
+        return 85
 
 
 def _severity_allowed(value: str, minimum: str) -> bool:

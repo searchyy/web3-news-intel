@@ -12,6 +12,10 @@ python -m venv .venv
 
 PostgreSQL and Redis integration tests are skipped unless `TEST_DATABASE_URL`, `TEST_REDIS_URL`, and `RUN_CELERY_WORKER_TESTS=1` are configured.
 
+## Local One-Click Runtime
+
+On Windows, double-click `dist\Web3NewsController\Web3NewsController.exe` for the GUI controller, or use `start_all.bat` after reboot to start Redis, the API, Celery workers, scheduler, and the frontend. Use `status_all.bat` to inspect health and Feishu schedule times, and `stop_all.bat` to stop the managed runtime. See [docs/LOCAL_ONE_CLICK_RUNTIME.md](docs/LOCAL_ONE_CLICK_RUNTIME.md) for details.
+
 ## Docker Setup
 
 ```bash

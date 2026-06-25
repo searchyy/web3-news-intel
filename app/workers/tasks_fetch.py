@@ -21,7 +21,7 @@ from app.observability.metrics import normalized_items_total, parse_results_tota
 from app.observability.tracing import bind_trace_id
 from app.pipeline.dedupe import DedupeService
 from app.scheduler.planner import ACTIVE_FETCH_STATUSES, begin_polling_write_lock, queue_due_sources
-from app.workers.celery_app import celery_app
+from app.workers.celery_app import CELERY_FETCH_PRIORITY, CELERY_FETCH_QUEUE, celery_app
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,6 +37,8 @@ class _FetchClaim:
 
 @celery_app.task(
     name="app.workers.tasks_fetch.poll_sources",
+    queue=CELERY_FETCH_QUEUE,
+    priority=CELERY_FETCH_PRIORITY,
     autoretry_for=(ConnectionError,),
     retry_backoff=True,
     retry_jitter=True,
@@ -56,19 +58,23 @@ def poll_sources() -> dict[str, int]:
 
 @celery_app.task(
     name="app.workers.tasks_fetch.fetch_source",
+    queue=CELERY_FETCH_QUEUE,
+    priority=CELERY_FETCH_PRIORITY,
     autoretry_for=(ConnectionError,),
     retry_backoff=True,
     retry_jitter=True,
     max_retries=3,
 )
-def fetch_source(source_key: str, fetch_run_id: int | None = None) -> dict[str, int | str]:
-    return asyncio.run(_fetch_source(source_key, fetch_run_id=fetch_run_id))
+def fetch_source(
+    source_key: str, fetch_run_id: int | None = None, force: bool = False
+) -> dict[str, int | str]:
+    return asyncio.run(_fetch_source(source_key, fetch_run_id=fetch_run_id, force=force))
 
 
 async def _fetch_source(
-    source_key: str, *, fetch_run_id: int | None = None
+    source_key: str, *, fetch_run_id: int | None = None, force: bool = False
 ) -> dict[str, int | str]:
-    claim = _claim_fetch_run(source_key, fetch_run_id=fetch_run_id)
+    claim = _claim_fetch_run(source_key, fetch_run_id=fetch_run_id, force=force)
     if isinstance(claim, dict):
         return claim
 
@@ -80,7 +86,8 @@ async def _fetch_source(
             max_response_bytes=config.max_response_bytes,
             allow_private_networks=config.allow_private_networks,
             allow_localhost=config.allow_localhost,
-            trust_env=False,
+            validate_dns_rebinding=_source_validate_dns_rebinding(config),
+            trust_env=settings.http_trust_env,
         ) as fetch_client:
             adapter = registry.get(config.adapter)
             raw_documents = await _fetch_with_conditionals(
@@ -122,7 +129,7 @@ async def _fetch_source(
 
 
 def _claim_fetch_run(
-    source_key: str, *, fetch_run_id: int | None
+    source_key: str, *, fetch_run_id: int | None, force: bool = False
 ) -> _FetchClaim | dict[str, int | str]:
     with SessionLocal() as session:
         if not begin_polling_write_lock(session):
@@ -141,10 +148,12 @@ def _claim_fetch_run(
 
         now = utc_now()
         circuit_open_until = ensure_utc(source.circuit_open_until)
-        if circuit_open_until is not None and circuit_open_until > now:
+        if circuit_open_until is not None and circuit_open_until > now and not force:
             _mark_run_skipped_by_id(session, fetch_run_id, error_code="circuit_open")
             session.commit()
             return {"status": "circuit_open", "items": 0}
+        if force:
+            source.circuit_open_until = None
 
         fetch_run = _get_or_create_fetch_run(session, source, fetch_run_id=fetch_run_id)
         if fetch_run is None:
@@ -173,8 +182,8 @@ def _claim_fetch_run(
             fetch_run_id=fetch_run.id,
             trace_id=fetch_run.trace_id,
             config=config,
-            etag=source.etag,
-            last_modified=source.last_modified,
+            etag=None if force else source.etag,
+            last_modified=None if force else source.last_modified,
         )
         session.commit()
         return claim
@@ -278,9 +287,12 @@ def _record_enqueued_task(fetch_run_id: int, task_id: str | None) -> None:
         session.commit()
 
 
-def enqueue_fetch_run(source_key: str, fetch_run_id: int) -> bool:
+def enqueue_fetch_run(source_key: str, fetch_run_id: int, *, force: bool = False) -> bool:
     try:
-        result = fetch_source.delay(source_key, fetch_run_id)
+        if force:
+            result = fetch_source.delay(source_key, fetch_run_id, force=True)
+        else:
+            result = fetch_source.delay(source_key, fetch_run_id)
     except Exception:
         _mark_enqueue_failed(fetch_run_id)
         return False
@@ -326,6 +338,13 @@ def _mark_enqueue_failed(fetch_run_id: int) -> None:
             source.consecutive_failures = (source.consecutive_failures or 0) + 1
             source.circuit_open_until = fetch_run.retry_after_until
         session.commit()
+
+
+def _source_validate_dns_rebinding(config: SourceConfig) -> bool | None:
+    value = config.config.get("validate_dns_rebinding")
+    if value is None:
+        return None
+    return bool(value)
 
 
 def _source_to_config(source: Source) -> SourceConfig:

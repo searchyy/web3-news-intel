@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 
 from sqlalchemy import (
     BigInteger,
+    Integer,
     Text,
     and_,
     case,
@@ -43,7 +44,9 @@ ai_insights_table = table(
     column("symbols", Text()),
     column("chains", Text()),
     column("event_type", Text()),
+    column("importance_score", Integer()),
     column("risk_level", Text()),
+    column("status", Text()),
 )
 
 
@@ -101,6 +104,7 @@ class EventSearchRepository:
         return EventFacets(
             categories=self._event_column_buckets(filtered, Event.category),
             severities=self._event_column_buckets(filtered, Event.severity),
+            priority_tiers=self._event_expr_buckets(filtered, self._priority_tier_expr()),
             statuses=self._event_column_buckets(filtered, Event.status),
             languages=self._event_column_buckets(filtered, Event.language),
             source_keys=self._source_buckets(filtered, Source.key),
@@ -131,14 +135,24 @@ class EventSearchRepository:
         def join_ai() -> None:
             nonlocal stmt, ai_joined
             if not ai_joined and self._has_ai_insights_table():
-                stmt = stmt.outerjoin(ai_insights_table, ai_insights_table.c.event_id == Event.id)
+                stmt = stmt.outerjoin(
+                    ai_insights_table,
+                    and_(
+                        ai_insights_table.c.event_id == Event.id,
+                        ai_insights_table.c.status == "success",
+                    ),
+                )
                 ai_joined = True
 
         if params.source_keys or params.source_groups or params.official_only is True:
             join_source()
         elif params.q:
             join_source(outer=True)
-        if params.has_ai_summary is not None or params.q:
+        if (
+            params.has_ai_summary is not None
+            or params.minimum_ai_importance_score is not None
+            or params.q
+        ):
             join_ai()
 
         conditions = []
@@ -156,6 +170,20 @@ class EventSearchRepository:
             conditions.append(self._array_overlap_condition(Event.chains, params.chains))
         if params.minimum_trust_score is not None:
             conditions.append(Event.trust_score >= params.minimum_trust_score)
+        if params.maximum_trust_score is not None:
+            conditions.append(Event.trust_score <= params.maximum_trust_score)
+        if params.minimum_priority_score is not None:
+            conditions.append(self._priority_score_expr() >= params.minimum_priority_score)
+        if params.maximum_priority_score is not None:
+            conditions.append(self._priority_score_expr() <= params.maximum_priority_score)
+        if params.minimum_ai_importance_score is not None:
+            conditions.append(
+                ai_insights_table.c.importance_score >= params.minimum_ai_importance_score
+                if ai_joined
+                else false()
+            )
+        if params.priority_tiers:
+            conditions.append(self._priority_tier_expr().in_(params.priority_tiers))
         if params.published_from is not None:
             conditions.append(Event.published_at >= params.published_from)
         if params.published_to is not None:
@@ -230,6 +258,7 @@ class EventSearchRepository:
             "first_seen_at": Event.first_seen_at,
             "last_seen_at": Event.last_seen_at,
             "trust_score": Event.trust_score,
+            "priority_score": self._priority_score_expr(),
             "confirmation_count": Event.confirmation_count,
             "id": Event.id,
         }
@@ -273,6 +302,34 @@ class EventSearchRepository:
             Source.config["official"].as_boolean().is_(True),
             Source.source_type.in_(["exchange_official", "regulator_official"]),
         )
+
+    def _priority_score_expr(self):
+        return func.coalesce(
+            cast(Event.metadata_["priority_score"].as_integer(), Integer),
+            Event.trust_score,
+        )
+
+    def _priority_tier_expr(self):
+        return func.coalesce(
+            Event.metadata_["priority_tier"].as_string(),
+            case(
+                (self._priority_score_expr() >= 85, "S"),
+                (self._priority_score_expr() >= 70, "A"),
+                (self._priority_score_expr() >= 55, "B"),
+                else_="noise",
+            ),
+        )
+
+    def _event_expr_buckets(self, filtered, expr) -> list[FacetBucket]:
+        rows = self.session.execute(
+            select(expr.label("bucket"), func.count(Event.id))
+            .join(filtered, filtered.c.id == Event.id)
+            .where(expr.is_not(None))
+            .group_by(expr)
+            .order_by(func.count(Event.id).desc(), expr.asc())
+            .limit(100)
+        )
+        return [FacetBucket(key=str(key), count=int(count)) for key, count in rows if key]
 
     def _event_column_buckets(self, filtered, column_value) -> list[FacetBucket]:
         rows = self.session.execute(
@@ -416,7 +473,7 @@ def _search_item(event: Event) -> EventSearchItem:
         payload.update(
             {
                 "source_key": primary_source.key,
-                "source_name": primary_source.name,
+                "source_name": primary_source.display_name_zh or primary_source.name,
                 "source_group": primary_source.source_group,
                 "official": primary_source.official,
             }

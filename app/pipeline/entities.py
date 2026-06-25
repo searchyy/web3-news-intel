@@ -9,6 +9,7 @@ STOP_SYMBOLS = {
     "CEO",
     "CFO",
     "DAO",
+    "DEX",
     "ETF",
     "EU",
     "FAQ",

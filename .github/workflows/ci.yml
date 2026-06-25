@@ -250,7 +250,7 @@ jobs:
       - name: Wait for Compose service health
         run: >
           python scripts/wait_compose_healthy.py --timeout 240
-          --services postgres,redis,mock-deepseek,mock-feishu,api,worker,scheduler,frontend
+          --services postgres,redis,mock-deepseek,mock-feishu,api,ai-worker,report-worker,fetch-worker,pipeline-worker,scheduler,frontend
         timeout-minutes: 4
       - name: Check API health
         run: |

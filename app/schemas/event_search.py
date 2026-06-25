@@ -13,6 +13,7 @@ SortField = Literal[
     "first_seen_at",
     "last_seen_at",
     "trust_score",
+    "priority_score",
     "severity",
     "confirmation_count",
     "id",
@@ -27,18 +28,23 @@ class EventSearchParams(BaseModel):
     source_groups: list[str] = Field(default_factory=list)
     categories: list[str] = Field(default_factory=list)
     severities: list[str] = Field(default_factory=list)
+    priority_tiers: list[str] = Field(default_factory=list)
     statuses: list[str] = Field(default_factory=list)
     symbols: list[str] = Field(default_factory=list)
     chains: list[str] = Field(default_factory=list)
     languages: list[str] = Field(default_factory=list)
     official_only: bool | None = None
     minimum_trust_score: int | None = Field(default=None, ge=0, le=100)
+    maximum_trust_score: int | None = Field(default=None, ge=0, le=100)
+    minimum_priority_score: int | None = Field(default=None, ge=0, le=100)
+    maximum_priority_score: int | None = Field(default=None, ge=0, le=100)
+    minimum_ai_importance_score: int | None = Field(default=None, ge=0, le=100)
     has_ai_summary: bool | None = None
     published_from: datetime | None = None
     published_to: datetime | None = None
     first_seen_from: datetime | None = None
     first_seen_to: datetime | None = None
-    sort: SortField = "published_at"
+    sort: SortField = "first_seen_at"
     direction: SortDirection = "desc"
     page: int = Field(default=1, ge=1)
     page_size: int = Field(default=50, ge=1, le=500)
@@ -48,6 +54,7 @@ class EventSearchParams(BaseModel):
         "source_groups",
         "categories",
         "severities",
+        "priority_tiers",
         "statuses",
         "symbols",
         "chains",
@@ -71,6 +78,11 @@ class EventSearchParams(BaseModel):
     @classmethod
     def uppercase_symbols(cls, value: list[str]) -> list[str]:
         return [item.upper() for item in value]
+
+    @field_validator("priority_tiers", mode="after")
+    @classmethod
+    def normalize_priority_tiers(cls, value: list[str]) -> list[str]:
+        return ["noise" if item.lower() == "noise" else item.upper() for item in value]
 
     @field_validator("q", mode="after")
     @classmethod
@@ -121,6 +133,7 @@ class FacetBucket(BaseModel):
 class EventFacets(BaseModel):
     categories: list[FacetBucket] = Field(default_factory=list)
     severities: list[FacetBucket] = Field(default_factory=list)
+    priority_tiers: list[FacetBucket] = Field(default_factory=list)
     statuses: list[FacetBucket] = Field(default_factory=list)
     languages: list[FacetBucket] = Field(default_factory=list)
     source_keys: list[FacetBucket] = Field(default_factory=list)

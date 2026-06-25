@@ -63,30 +63,87 @@ services:
       mock-feishu:
         condition: service_healthy
 
-  worker:
+  ai-worker:
     command: >
       celery -A app.workers.celery_app worker
-      --hostname=worker@%h
+      --hostname=ai-worker@%h
       --pool=solo
       --concurrency=1
       --loglevel=INFO
-    environment:
+      --queues=ai
+    environment: &acceptance-worker-env
       <<: *acceptance-env
       COMPOSE_E2E_API_BASE: ""
       COMPOSE_E2E_FRONTEND_BASE: ""
       COMPOSE_E2E_MOCK_DEEPSEEK_BASE: ""
       COMPOSE_E2E_MOCK_FEISHU_BASE: ""
       COMPOSE_E2E_ADMIN_PASSWORD: ""
-    healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "celery -A app.workers.celery_app inspect ping --timeout=5 | grep -q pong",
-        ]
-      interval: 10s
-      timeout: 10s
-      retries: 30
-      start_period: 30s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+      mock-deepseek:
+        condition: service_healthy
+      mock-feishu:
+        condition: service_healthy
+
+  report-worker:
+    command: >
+      celery -A app.workers.celery_app worker
+      --hostname=report-worker@%h
+      --pool=solo
+      --concurrency=1
+      --loglevel=INFO
+      --queues=report
+    environment:
+      <<: *acceptance-worker-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+      mock-deepseek:
+        condition: service_healthy
+      mock-feishu:
+        condition: service_healthy
+
+  fetch-worker:
+    command: >
+      celery -A app.workers.celery_app worker
+      --hostname=fetch-worker@%h
+      --pool=solo
+      --concurrency=1
+      --loglevel=INFO
+      --queues=fetch
+    environment:
+      <<: *acceptance-worker-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+      mock-deepseek:
+        condition: service_healthy
+      mock-feishu:
+        condition: service_healthy
+
+  pipeline-worker:
+    command: >
+      celery -A app.workers.celery_app worker
+      --hostname=pipeline-worker@%h
+      --pool=solo
+      --concurrency=1
+      --loglevel=INFO
+      --queues=pipeline,web3-news-intel
+    environment:
+      <<: *acceptance-worker-env
     depends_on:
       postgres:
         condition: service_healthy

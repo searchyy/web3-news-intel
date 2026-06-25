@@ -39,10 +39,10 @@ FIXTURE_CASES = [
     ("kraken_announcements", "kraken_announcements_rss.xml", "listing"),
     ("bitget_announcements", "bitget_announcements_html.html", "listing"),
     ("okx_announcements", "okx_announcements_html.html", "listing"),
-    ("bybit_announcements", "bybit_announcements_json.json", "derivatives_listing"),
+    ("bybit_announcements", "bybit_announcements_html.html", "derivatives_listing"),
     ("bitstamp_announcements", "bitstamp_announcements_rss.xml", "trading_rule"),
     ("gate_announcements", "gate_announcements_json.json", "delisting"),
-    ("mexc_announcements", "mexc_announcements_json.json", "deposit_withdrawal"),
+    ("mexc_announcements", "mexc_announcements_html.html", "deposit_withdrawal"),
     ("hashkey_announcements", "hashkey_announcements_html.html", "security_incident"),
 ]
 
@@ -71,16 +71,14 @@ def test_exchange_catalog_covers_top10_and_candidates() -> None:
             "DISABLED",
             "UNSUPPORTED",
         }
-        if source["live_canary_status"] == "DISABLED":
-            assert source["enabled"] is False
-            assert source["last_canary_error"]
     for candidate in (
         "kucoin_announcements",
         "upbit_announcements",
         "htx_announcements",
         "crypto_com_exchange_announcements",
     ):
-        assert sources[candidate]["enabled"] is False
+        assert sources[candidate]["enabled"] is True
+        assert sources[candidate]["live_canary_status"] == "NOT_RUN"
         assert sources[candidate]["ranking_position"] is None
 
 

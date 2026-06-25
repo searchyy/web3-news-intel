@@ -11,11 +11,13 @@ from app.db.session import SessionLocal
 from app.observability.metrics import normalized_items_total, parse_results_total
 from app.pipeline.dedupe import DedupeService
 from app.schemas.raw_document import RawDocumentPayload
-from app.workers.celery_app import celery_app
+from app.workers.celery_app import CELERY_PIPELINE_PRIORITY, CELERY_PIPELINE_QUEUE, celery_app
 
 
 @celery_app.task(
     name="app.workers.tasks_parse.parse_raw_document",
+    queue=CELERY_PIPELINE_QUEUE,
+    priority=CELERY_PIPELINE_PRIORITY,
     autoretry_for=(ConnectionError,),
     retry_backoff=True,
     retry_jitter=True,

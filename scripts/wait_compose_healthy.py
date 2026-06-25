@@ -7,7 +7,17 @@ import sys
 import time
 from typing import Any
 
-REQUIRED_SERVICES = ("postgres", "redis", "api", "worker", "scheduler", "frontend")
+REQUIRED_SERVICES = (
+    "postgres",
+    "redis",
+    "api",
+    "ai-worker",
+    "report-worker",
+    "fetch-worker",
+    "pipeline-worker",
+    "scheduler",
+    "frontend",
+)
 
 
 def main(argv: list[str] | None = None) -> int:

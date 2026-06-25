@@ -49,6 +49,8 @@ SOURCE_GROUPS = {
     "regulator_official",
     "protocol_official",
     "onchain_data",
+    "project_official",
+    "project_news",
 }
 CATALOG_REQUIRED_FIELDS = {
     "name",

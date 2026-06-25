@@ -276,6 +276,33 @@ async def test_ai_runtime_status_reports_worker_failure(monkeypatch, db_session)
         await client.aclose()
         app.dependency_overrides.clear()
 
+@pytest.mark.asyncio
+async def test_event_ai_insight_returns_null_when_missing(monkeypatch, db_session) -> None:
+    _csrf, client = await _logged_in_client(monkeypatch, db_session)
+    event = _event(event_key="ai:insight:missing")
+    db_session.add(event)
+    db_session.flush()
+
+    try:
+        response = await client.get(f"/api/admin/events/{event.id}/ai-insight")
+        assert response.status_code == 200
+        assert response.json() is None
+    finally:
+        await client.aclose()
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_event_ai_insight_missing_event_returns_404(monkeypatch, db_session) -> None:
+    _csrf, client = await _logged_in_client(monkeypatch, db_session)
+
+    try:
+        response = await client.get("/api/admin/events/999999/ai-insight")
+        assert response.status_code == 404
+        assert response.json()["detail"] == "事件不存在"
+    finally:
+        await client.aclose()
+        app.dependency_overrides.clear()
 
 async def _logged_in_client(monkeypatch, db_session) -> tuple[str, httpx.AsyncClient]:
     monkeypatch.setattr(settings, "admin_username", "admin")

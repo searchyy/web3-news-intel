@@ -9,6 +9,9 @@ class ScoreResult(BaseModel):
     severity: str
     confirmation_count: int
     reasons: list[str]
+    priority_score: int = 0
+    priority_tier: str = "noise"
+    noise_reasons: list[str] = []
 
 
 class AlertDecision(BaseModel):

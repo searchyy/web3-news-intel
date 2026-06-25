@@ -27,9 +27,19 @@ from app.db.repositories.delivery_repo import DeliveryRepository
 from app.integrations.feishu.client import FeishuClient
 from app.integrations.feishu.models import FeishuSendResult
 from app.integrations.feishu.report_cards import ReportPreview, build_report_preview
+from app.pipeline.scoring import event_priority_score
 from app.publishers.feishu import _sanitize_error
 
 SEVERITY_ORDER = {"critical": 4, "high": 3, "normal": 2, "low": 1}
+REPORT_DEFAULT_PRIORITY = {
+    "immediate": 85,
+    "digest_15m": 70,
+    "digest_30m": 70,
+    "hourly": 70,
+    "daily_morning": 55,
+    "daily_evening": 55,
+    "custom": 55,
+}
 
 
 @dataclass(slots=True)
@@ -207,9 +217,12 @@ class FeishuReportService:
         if scheduled_next_run and scheduled_next_run > current:
             return None
         window_end = self._due_window_end(schedule, current)
-        window_start = ensure_utc(schedule.last_window_end) or self.default_window_start(
-            schedule, window_end
-        )
+        if _is_paired_daily_report(schedule):
+            window_start = self.default_window_start(schedule, window_end)
+        else:
+            window_start = ensure_utc(schedule.last_window_end) or self.default_window_start(
+                schedule, window_end
+            )
         activated_at = ensure_utc(schedule.activated_at)
         if activated_at and window_start < activated_at:
             window_start = activated_at
@@ -232,6 +245,8 @@ class FeishuReportService:
         window_end: datetime,
     ) -> list[Event]:
         filters = _merged_filters(schedule, self._saved_search_filters(schedule.saved_search_id))
+        query_limit = _query_event_limit(schedule)
+        result_limit = _report_event_limit(schedule)
         query_window_start = _db_datetime(self.session, window_start)
         query_window_end = _db_datetime(self.session, window_end)
         stmt = (
@@ -243,7 +258,7 @@ class FeishuReportService:
             .where(Event.first_seen_at >= query_window_start)
             .where(Event.first_seen_at < query_window_end)
             .order_by(Event.first_seen_at.desc(), Event.id.desc())
-            .limit(max(schedule.maximum_events * 5, 50))
+            .limit(query_limit)
         )
         activated_at = ensure_utc(schedule.activated_at)
         if activated_at:
@@ -260,20 +275,25 @@ class FeishuReportService:
             for event in events
             if _event_matches_arrays(event, filters)
             and _event_matches_source_groups(event, filters["source_groups"])
+            and event_priority_score(event) >= filters["minimum_priority_score"]
         ]
         filtered.sort(
             key=lambda event: (
+                event_priority_score(event),
                 SEVERITY_ORDER.get(event.severity, 0),
                 event.published_at or event.first_seen_at,
                 event.id,
             ),
             reverse=True,
         )
-        return filtered[: schedule.maximum_events]
+        return filtered[:result_limit]
 
     def default_window_start(self, schedule: ReportSchedule, window_end: datetime) -> datetime:
-        interval = schedule.interval_minutes or _default_interval_minutes(schedule.report_type)
-        start = window_end - timedelta(minutes=interval)
+        if _is_paired_daily_report(schedule):
+            start = _paired_daily_window_start(self.session, schedule, window_end)
+        else:
+            interval = schedule.interval_minutes or _default_interval_minutes(schedule.report_type)
+            start = window_end - timedelta(minutes=interval)
         activated_at = ensure_utc(schedule.activated_at)
         if activated_at and start < activated_at:
             return activated_at
@@ -434,6 +454,7 @@ def report_idempotency_material(preview: ReportPreview, *, test_send: bool = Fal
         "symbols": sorted(schedule.symbols),
         "chains": sorted(schedule.chains),
         "minimum_trust_score": schedule.minimum_trust_score,
+        "minimum_priority_score": _minimum_priority_score(schedule, {}),
         "include_ai_summary": schedule.include_ai_summary,
         "maximum_events": schedule.maximum_events,
         "window_start": preview.window_start.astimezone(UTC).isoformat(),
@@ -477,8 +498,84 @@ def _merged_filters(
         "minimum_trust_score": schedule.minimum_trust_score
         if schedule.minimum_trust_score not in (None, 0)
         else saved_search_filters.get("minimum_trust_score"),
+        "minimum_priority_score": _minimum_priority_score(schedule, saved_search_filters),
     }
 
+
+
+
+def _is_daily_summary_report(schedule: ReportSchedule) -> bool:
+    return schedule.report_type in {"daily_morning", "daily_evening", "custom"}
+
+
+def _query_event_limit(schedule: ReportSchedule) -> int:
+    base = max(schedule.maximum_events * 5, 50)
+    if _is_daily_summary_report(schedule):
+        return max(base, 200)
+    return base
+
+
+def _report_event_limit(schedule: ReportSchedule) -> int:
+    if _is_daily_summary_report(schedule):
+        return max(schedule.maximum_events, 50)
+    return schedule.maximum_events
+
+
+def _is_paired_daily_report(schedule: ReportSchedule) -> bool:
+    return schedule.report_type in {"daily_morning", "daily_evening"}
+
+
+def _paired_daily_window_start(
+    session: Session, schedule: ReportSchedule, window_end: datetime
+) -> datetime:
+    paired = _paired_daily_schedule(session, schedule)
+    zone = ZoneInfo(schedule.timezone or (paired.timezone if paired else "UTC") or "UTC")
+    local_end = window_end.astimezone(zone)
+    fallback_hour = 9 if schedule.report_type == "daily_evening" else 18
+    start_hour = paired.hour if paired and paired.hour is not None else fallback_hour
+    start_minute = paired.minute if paired and paired.minute is not None else 0
+    start_local = local_end.replace(
+        hour=start_hour,
+        minute=start_minute,
+        second=0,
+        microsecond=0,
+    )
+    if start_local >= local_end:
+        start_local -= timedelta(days=1)
+    return start_local.astimezone(UTC)
+
+
+def _paired_daily_schedule(
+    session: Session, schedule: ReportSchedule
+) -> ReportSchedule | None:
+    pair_type = (
+        "daily_morning" if schedule.report_type == "daily_evening" else "daily_evening"
+    )
+    return session.scalar(
+        select(ReportSchedule)
+        .where(ReportSchedule.destination_id == schedule.destination_id)
+        .where(ReportSchedule.report_type == pair_type)
+        .where(ReportSchedule.enabled.is_(True))
+        .order_by(ReportSchedule.created_at.desc(), ReportSchedule.id.desc())
+    )
+
+
+def _minimum_priority_score(
+    schedule: ReportSchedule, saved_search_filters: dict[str, Any]
+) -> int:
+    configured = saved_search_filters.get("minimum_priority_score")
+    if configured not in (None, ""):
+        try:
+            return max(0, min(100, int(configured)))
+        except (TypeError, ValueError):
+            pass
+    explicit_filters = any(
+        saved_search_filters.get(key)
+        for key in ("source_groups", "categories", "severities", "symbols", "chains")
+    )
+    if explicit_filters:
+        return 0
+    return REPORT_DEFAULT_PRIORITY.get(schedule.report_type, 55)
 
 def _list_filter(value: Any) -> list[str]:
     if not value:

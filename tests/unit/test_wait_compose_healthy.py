@@ -31,16 +31,16 @@ def test_unhealthy_service_returns_failure_on_timeout(monkeypatch, capsys) -> No
     err = capsys.readouterr().err
     assert "Timed out waiting for compose health" in err
     assert "::error title=Compose health timeout::" in err
-    assert "worker" in err
+    assert "ai-worker" in err
 
 
 def test_missing_required_service_returns_failure(monkeypatch, capsys) -> None:
     services = _services("healthy")
-    services = [service for service in services if service["Service"] != "worker"]
+    services = [service for service in services if service["Service"] != "ai-worker"]
     monkeypatch.setattr(waiter.subprocess, "run", _runner([json.dumps(services)]))
     assert waiter.main(["--timeout", "0"]) == 1
     err = capsys.readouterr().err
-    assert "worker" in err
+    assert "ai-worker" in err
     assert "::error title=Compose health timeout::" in err
 
 

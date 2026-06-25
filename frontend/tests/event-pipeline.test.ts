@@ -26,7 +26,7 @@ describe("event pipeline client", () => {
   it("提供飞书队列、发送、dry-run 和抑制状态中文文案", () => {
     expect(pipelineStatusText("feishu", "queued")).toBe("待发送");
     expect(pipelineStatusText("feishu", "sending")).toBe("发送中");
-    expect(pipelineStatusText("feishu", "dry_run")).toBe("Dry-run 未实发");
+    expect(pipelineStatusText("feishu", "dry_run")).toBe("未实发");
     expect(pipelineStatusText("feishu", "suppressed")).toBe("已抑制");
   });
 

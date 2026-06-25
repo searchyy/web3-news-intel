@@ -16,6 +16,12 @@ export type EventRow = {
   severity: string;
   status: string;
   trust_score: number;
+  confirmation_count?: number;
+  priority_score?: number;
+  priority_tier?: string;
+  source_count?: number;
+  score_reasons?: string[];
+  noise_reasons?: string[];
   symbols: string[];
   chains?: string[];
   entities?: string[];
@@ -57,6 +63,7 @@ export type EventFacets = {
   source_groups?: FacetOption[];
   categories?: FacetOption[];
   severities?: FacetOption[];
+  priority_tiers?: FacetOption[];
   statuses?: FacetOption[];
   symbols?: FacetOption[];
   chains?: FacetOption[];

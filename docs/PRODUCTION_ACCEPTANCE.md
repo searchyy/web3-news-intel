@@ -1,70 +1,103 @@
 # Production Acceptance
 
-Date: 2026-06-18
+Date: 2026-06-23
 
-Phase 13 status: local handoff checks pass, but release is `BLOCKED` because this workspace is not a Git repository, no `GITHUB_REPO_URL` was provided, `gh` is unavailable, Docker is unavailable, and no current-commit GitHub Actions evidence exists.
+Evaluated commit: `64685c1247ca33d90bfb72acc06cb608c233112f`
 
-## Evidence Table
+Status: local acceptance gates have passed for the evaluated commit. Production
+release remains `BLOCKED` until the same commit has GitHub Actions evidence and
+real-service Compose evidence for PostgreSQL, Redis/Celery, API health, and
+fixture E2E.
 
-| Gate | Job/Command | Result | Evidence |
+## Verified Local Evidence
+
+| Gate | Command | Result | Scope |
 | --- | --- | --- | --- |
-| Ruff | `quality/local` | PASS | `python scripts/pre_push_acceptance.py`; ruff exit `0`, `All checks passed!` |
-| Mypy | `quality/local` | PASS | `python scripts/pre_push_acceptance.py`; mypy exit `0`, `Success: no issues found in 73 source files` |
-| Unit tests | `quality/local` | PASS | `python scripts/pre_push_acceptance.py`; 65 unit tests collected, all passed |
-| Deterministic integration | `quality/local` | PASS | `python scripts/pre_push_acceptance.py`; 11 fixture integration tests collected, all passed |
-| PostgreSQL migration cycle | `postgres-integration` | NOT EXECUTED | No GitHub Actions run for current commit; local PostgreSQL unavailable |
-| PostgreSQL integration | `postgres-integration` | NOT EXECUTED | No GitHub Actions run for current commit; local `-m postgres` tests skipped without service |
-| Redis/Celery real task | `redis-celery-integration` | NOT EXECUTED | No GitHub Actions run for current commit; local Redis/Celery worker unavailable |
-| Retry | `redis-celery-integration` | NOT EXECUTED | Real transient retry test exists but has no current CI evidence |
-| Worker restart recovery | `redis-celery-integration` | NOT EXECUTED | Worker-loss test exists but has no current CI evidence |
-| Compose stack | `compose-acceptance` | NOT EXECUTED | Docker command unavailable in this workspace |
-| API health | `compose-acceptance` | NOT EXECUTED | Compose stack did not start locally and no CI evidence exists |
-| Compose fixture E2E | `compose-acceptance` | NOT EXECUTED | Compose E2E script exists but has no current CI evidence |
-| Event/delivery idempotency | `compose-acceptance` | NOT EXECUTED | Covered by local fixture tests; Compose-backed evidence missing |
-| URL safety defaults | `quality/local` | PASS | Unit tests cover production defaults, blocked host/IP forms, redirects, source URLs, and webhook targets |
+| Git repository | `git rev-parse HEAD` | PASS | Current workspace is a Git repository at `64685c1247ca33d90bfb72acc06cb608c233112f` |
+| Ruff | `python scripts/pre_push_acceptance.py` | PASS | Backend lint gate |
+| Mypy | `python scripts/pre_push_acceptance.py` | PASS | Backend type gate for `app` and `scripts` |
+| Unit tests | `python scripts/pre_push_acceptance.py` | PASS | Deterministic backend unit tests |
+| Fixture integration | `python scripts/pre_push_acceptance.py` | PASS | Integration tests excluding PostgreSQL, Redis, Celery, Compose, and live sources |
+| Source validation | `python scripts/pre_push_acceptance.py` | PASS | Runtime source validation |
+| Source strict contract | `python scripts/validate_sources.py sources.yaml --strict-contract --catalog-dir source_catalog` | PASS | Source catalog contract and security defaults |
+| Frontend typecheck | `cd frontend && npm run typecheck` | PASS | TypeScript compile check |
+| Frontend tests | `cd frontend && npm test` | PASS | Vitest frontend suite |
+| Frontend build | `cd frontend && npm run build` | PASS | Production frontend bundle |
+| Compose config | `docker compose config --quiet` | PASS | Static Compose configuration validation only |
+
+## Still Required For Production Release
+
+| Gate | Required Evidence | Current Status | Reason |
+| --- | --- | --- | --- |
+| GitHub Actions for current commit | Successful run URL for `64685c1247ca33d90bfb72acc06cb608c233112f` | MISSING | Local passes do not replace CI evidence |
+| `quality` job | GitHub Actions pass on the evaluated commit | MISSING | Must confirm clean runner environment |
+| `frontend-quality` job | GitHub Actions pass on the evaluated commit | MISSING | Must confirm frontend install/test/build in CI |
+| PostgreSQL migration cycle | `postgres-integration` Actions job or equivalent service log | MISSING | Requires real PostgreSQL service |
+| PostgreSQL integration | `postgres-integration` Actions job with zero service-gated skips | MISSING | Local fixture tests do not cover PostgreSQL behavior |
+| Redis/Celery real task execution | `redis-celery-integration` Actions job with zero service-gated skips | MISSING | Requires real Redis broker and Celery worker |
+| Retry and worker recovery | `redis-celery-integration` Actions job logs | MISSING | Must prove transient retry and worker-loss recovery against services |
+| Compose stack startup | `compose-acceptance` Actions job or captured production-like run | MISSING | `docker compose config` does not start containers |
+| API health | Compose-backed health check evidence | MISSING | Requires running API service |
+| Compose fixture E2E | Compose-backed fixture E2E output | MISSING | Requires running API, worker, database, and broker services |
+| Event/delivery idempotency | Compose-backed test evidence | MISSING | Fixture-only local coverage is not enough for release |
 
 ## Local Commands
 
+The current local gate evidence includes:
+
 ```text
 python scripts/pre_push_acceptance.py
+python scripts/validate_sources.py sources.yaml --strict-contract --catalog-dir source_catalog
+cd frontend && npm run typecheck
+cd frontend && npm test
+cd frontend && npm run build
+docker compose config --quiet
 ```
 
-Result:
-
-```text
-ruff: PASS exit=0
-mypy: PASS exit=0
-unit: PASS exit=0
-fixture-integration: PASS exit=0
-sources: PASS exit=0
-```
-
-Additional collection counts:
-
-```text
-tests/unit: 65 collected
-tests/integration fixture subset: 11 collected
-tests/integration all: 23 collected
-```
+`docker compose config --quiet` is a configuration parser check. It does not
+prove image builds, container startup, service health, migrations, worker task
+execution, or Compose-backed E2E behavior.
 
 ## Git And CI Status
 
 | Item | Result | Evidence |
 | --- | --- | --- |
-| Git repository | BLOCKED | `git rev-parse --is-inside-work-tree` returned `fatal: not a git repository` |
-| GitHub remote | NOT EXECUTED | `GITHUB_REPO_URL` not set |
-| GitHub CLI | BLOCKED | `gh` command not found |
-| Commit SHA | NOT EXECUTED | No Git repository, no commit |
-| Pull request | NOT EXECUTED | No push performed |
-| CI run | NOT EXECUTED | No GitHub Actions run ID or URL |
+| Git repository | PASS | `git rev-parse HEAD` returns `64685c1247ca33d90bfb72acc06cb608c233112f` |
+| GitHub remote | PASS | `origin` is configured as `https://searchyy@github.com/searchyy/web3-news-intel.git` |
+| Commit SHA | PASS | Evaluated commit is `64685c1247ca33d90bfb72acc06cb608c233112f` |
+| Pull request | NOT VERIFIED | No PR URL is recorded in this document |
+| CI run | NOT VERIFIED | No GitHub Actions run ID or URL is recorded for the evaluated commit |
+| Production-like services | NOT VERIFIED | No current evidence for running PostgreSQL, Redis/Celery, or Compose fixture E2E |
+
+## Dependency Reproducibility
+
+Frontend dependencies are reproducible through `frontend/package-lock.json`.
+
+Backend dependencies are declared in `pyproject.toml` with version ranges, but no
+backend lock file is currently recorded in this repository. That leaves CI and
+production installs open to different transitive dependency resolutions over
+time.
+
+Recommendation:
+
+- Adopt one backend lock mechanism for Python 3.12 and commit the lock file.
+- Acceptable options include `uv.lock`, a pip-tools generated
+  `requirements.lock`, or another single project-standard lock format.
+- CI and Docker images should install backend dependencies from the committed
+  lock in frozen mode, preferably with hashes when supported.
+- Dependency updates should be deliberate PRs that regenerate the lock and rerun
+  the full local and CI acceptance gates.
 
 ## Release Recommendation
 
-BLOCKED until a real GitHub repository receives these changes and the current commit passes:
+Keep release `BLOCKED` until the evaluated commit has successful GitHub Actions
+evidence for:
 
 - `quality`
+- `frontend-quality`
 - `postgres-integration`
 - `redis-celery-integration`
 - `compose-acceptance`
 
-All service-gated tests must report zero skips.
+All service-gated tests must report zero skips. After those runs are available,
+record the run URLs and any relevant Compose service logs in this document.

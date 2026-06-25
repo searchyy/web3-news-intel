@@ -549,7 +549,8 @@ export function FeishuGroupsPage() {
         open={creatingWebhook}
         footer={null}
         onCancel={() => setCreatingWebhook(false)}
-        destroyOnClose
+        destroyOnHidden
+        forceRender
       >
         <Form form={webhookForm} layout="vertical" onFinish={(values) => createWebhook.mutate(values)}>
           <Form.Item label="Key" name="key" rules={[{ required: true, message: "请输入唯一 Key" }]}>
@@ -579,7 +580,8 @@ export function FeishuGroupsPage() {
           setScheduleModalOpen(false);
           setEditingSchedule(null);
         }}
-        destroyOnClose
+        destroyOnHidden
+        forceRender
       >
         <Form form={scheduleForm} layout="vertical" onFinish={(values) => saveSchedule.mutate(values)}>
           <Space wrap align="start" className="form-grid">
@@ -673,7 +675,8 @@ export function FeishuGroupsPage() {
         confirmLoading={createImmediateRule.isPending}
         onOk={() => ruleForm.submit()}
         onCancel={() => setRuleModalOpen(false)}
-        destroyOnClose
+        destroyOnHidden
+        forceRender
       >
         <Alert
           type="info"

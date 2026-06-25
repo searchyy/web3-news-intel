@@ -23,6 +23,7 @@ from app.integrations.ai.service import (
     AIConfigurationError,
     AIJobStoppedError,
     AIService,
+    auto_event_allowed,
     build_event_input,
     mark_stale_ai_runs,
     provider_config_to_public_dict,
@@ -610,6 +611,34 @@ def test_mark_stale_ai_runs_fails_old_retrying_job(monkeypatch, db_session) -> N
     assert changed == 1
     assert run.status == "failed"
     assert run.error_code == "ai_job_timeout"
+
+
+def test_auto_ai_allows_high_priority_event_below_severity_threshold(db_session) -> None:
+    service = AIService(db_session)
+    config = service.get_or_create_provider_config("deepseek")
+    config.auto_process_enabled = True
+    config.auto_minimum_severity = "critical"
+    config.config = {"auto_minimum_priority_score": 85}
+    event = _event()
+    event.severity = "normal"
+    event.metadata_ = {"priority_score": 90, "priority_tier": "S"}
+
+    assert auto_event_allowed(event, config) is True
+
+    event.metadata_ = {"priority_score": 84, "priority_tier": "A"}
+    assert auto_event_allowed(event, config) is False
+
+
+def test_auto_ai_still_allows_critical_event_without_high_priority(db_session) -> None:
+    service = AIService(db_session)
+    config = service.get_or_create_provider_config("deepseek")
+    config.auto_minimum_severity = "critical"
+    config.config = {"auto_minimum_priority_score": 85}
+    event = _event()
+    event.severity = "critical"
+    event.metadata_ = {"priority_score": 30, "priority_tier": "noise"}
+
+    assert auto_event_allowed(event, config) is True
 
 
 @pytest.mark.asyncio

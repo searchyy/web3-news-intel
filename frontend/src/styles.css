@@ -48,12 +48,23 @@ body {
 }
 
 .event-search-input {
-  width: min(560px, 100%);
+  width: 100%;
 }
 
 .event-q-mode,
 .saved-search-select {
   width: 160px;
+}
+
+.table-filter-dropdown {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  width: 260px;
+}
+
+.table-filter-control {
+  width: 100%;
 }
 
 .saved-search-row {

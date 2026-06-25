@@ -86,7 +86,7 @@ def mark_source_queued(
     if source is None or not source.enabled:
         return None
     circuit_open_until = ensure_utc(source.circuit_open_until)
-    if circuit_open_until is not None and circuit_open_until > now:
+    if circuit_open_until is not None and circuit_open_until > now and not force:
         return None
     if expire_stale_fetch_runs(session, source, now=now):
         session.flush()
