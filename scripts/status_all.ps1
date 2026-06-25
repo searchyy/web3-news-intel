@@ -1,0 +1,1 @@
+& (Join-Path $PSScriptRoot 'local_runtime.ps1') -Status

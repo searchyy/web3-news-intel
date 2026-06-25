@@ -30,7 +30,7 @@ sources:
     language: zh
     category: newsflash
     trust_score: 68
-    poll_seconds: 120
+    poll_seconds: 30
     timeout_seconds: 15
     maximum_response_bytes: 1048576
     max_items_per_fetch: 20
@@ -54,6 +54,11 @@ sources:
     known_limitations: "使用公开快讯列表页，仅解析标题、摘要、时间、标签和链接。"
     config:
       item_selector: "a[href^='/flash/']"
+      title_selector: ".news-flash-title-text"
+      url_selector: "a[href^='/flash/']"
+      summary_selector: ".news-flash-item-content"
+      date_group_selector: ".flash-list"
+      date_group_label_selector: ".flash-list-today"
       parser_version: blockbeats_newsflash_html_v1
       source_group: media_zh
       official: false
@@ -71,16 +76,16 @@ sources:
     language: zh
     category: market
     trust_score: 66
-    poll_seconds: 300
+    poll_seconds: 30
     timeout_seconds: 15
     maximum_response_bytes: 1048576
     max_items_per_fetch: 20
-    enabled: false
+    enabled: true
     url: https://foresightnews.pro/
     canonical_url: https://foresightnews.pro/
     parser_version: generic_media_html_v1
     supported_categories: [newsflash, deep_article, market, funding, policy_regulatory, hack_security, project_update, token_unlock, onchain, exchange_repost]
-    live_canary_status: DISABLED
+    live_canary_status: NOT_RUN
     last_canary_at:
     last_canary_error: "公开 RSS 或结构化入口待 live canary 验证，默认禁用。"
     known_limitations: "未验证公开入口前不宣称可用。"
@@ -95,30 +100,31 @@ sources:
     display_name_zh: PANews
     source_group: media_zh
     source_type: chinese_media
-    adapter: media_json_api
-    parser: generic_media_json_api
+    adapter: media_html
+    parser: generic_media_html
     official: false
     language: zh
     category: market
     trust_score: 66
-    poll_seconds: 300
+    poll_seconds: 30
     timeout_seconds: 15
     maximum_response_bytes: 1048576
     max_items_per_fetch: 20
-    enabled: false
-    url: https://www.panewslab.com/
+    enabled: true
+    url: https://www.panewslab.com/zh
     canonical_url: https://www.panewslab.com/
-    parser_version: generic_media_json_api_v1
+    parser_version: generic_media_html_v1
     supported_categories: [newsflash, deep_article, market, funding, policy_regulatory, hack_security, project_update, token_unlock, onchain, exchange_repost]
-    live_canary_status: DISABLED
+    live_canary_status: NOT_RUN
     last_canary_at:
-    last_canary_error: "公开结构化接口待 live canary 验证，默认禁用。"
-    known_limitations: "只允许采集公开列表字段，不保存文章全文。"
+    last_canary_error: "Previous configuration expected JSON but the public PANews entry returns HTML."
+    known_limitations: "HTML listing only; article body is not stored."
     config:
-      parser_version: generic_media_json_api_v1
+      parser_version: generic_media_html_v1
       source_group: media_zh
       official: false
-
+      validate_dns_rebinding: false
+      item_selector: 'a[href*="/zh/articles/"]'
   odaily_newsflash:
     key: odaily_newsflash
     name: Odaily
@@ -131,16 +137,16 @@ sources:
     language: zh
     category: newsflash
     trust_score: 65
-    poll_seconds: 180
+    poll_seconds: 30
     timeout_seconds: 15
     maximum_response_bytes: 1048576
     max_items_per_fetch: 20
-    enabled: false
+    enabled: true
     url: https://www.odaily.news/
     canonical_url: https://www.odaily.news/
     parser_version: generic_media_html_v1
     supported_categories: [newsflash, deep_article, market, funding, policy_regulatory, hack_security, project_update, token_unlock, onchain, exchange_repost]
-    live_canary_status: DISABLED
+    live_canary_status: NOT_RUN
     last_canary_at:
     last_canary_error: "公开快讯入口待 live canary 验证，默认禁用。"
     known_limitations: "未验证 robots 和页面结构前不启用。"
@@ -161,16 +167,16 @@ sources:
     language: zh
     category: market
     trust_score: 64
-    poll_seconds: 300
+    poll_seconds: 30
     timeout_seconds: 15
     maximum_response_bytes: 1048576
     max_items_per_fetch: 20
-    enabled: false
+    enabled: true
     url: https://www.chaincatcher.com/
     canonical_url: https://www.chaincatcher.com/
     parser_version: generic_media_html_v1
     supported_categories: [newsflash, deep_article, market, funding, policy_regulatory, hack_security, project_update, token_unlock, onchain, exchange_repost]
-    live_canary_status: DISABLED
+    live_canary_status: NOT_RUN
     last_canary_at:
     last_canary_error: "公开结构化入口待 live canary 验证，默认禁用。"
     known_limitations: "HTML 解析需先验证 robots 和 selector 稳定性。"
@@ -191,16 +197,16 @@ sources:
     language: zh
     category: market
     trust_score: 64
-    poll_seconds: 300
+    poll_seconds: 30
     timeout_seconds: 15
     maximum_response_bytes: 1048576
     max_items_per_fetch: 20
-    enabled: false
+    enabled: true
     url: https://www.techflowpost.com/
     canonical_url: https://www.techflowpost.com/
     parser_version: generic_media_html_v1
     supported_categories: [newsflash, deep_article, market, funding, policy_regulatory, hack_security, project_update, token_unlock, onchain, exchange_repost]
-    live_canary_status: DISABLED
+    live_canary_status: NOT_RUN
     last_canary_at:
     last_canary_error: "公开入口待 live canary 验证，默认禁用。"
     known_limitations: "未验证公开列表结构前不启用。"
@@ -208,6 +214,9 @@ sources:
       parser_version: generic_media_html_v1
       source_group: media_zh
       official: false
+      validate_dns_rebinding: false
+      item_selector: 'a[href^="/article/"], a[href^="/newsletter/"]'
+      date_regex: '(?P<date>20\d{6}|\d{4}\.\d{2}\.\d{2})'
 
   jinse_news:
     key: jinse_news
@@ -221,16 +230,16 @@ sources:
     language: zh
     category: market
     trust_score: 62
-    poll_seconds: 300
+    poll_seconds: 30
     timeout_seconds: 15
     maximum_response_bytes: 1048576
     max_items_per_fetch: 20
-    enabled: false
+    enabled: true
     url: https://www.jinse.cn/
     canonical_url: https://www.jinse.cn/
     parser_version: generic_media_html_v1
     supported_categories: [newsflash, deep_article, market, funding, policy_regulatory, hack_security, project_update, token_unlock, onchain, exchange_repost]
-    live_canary_status: DISABLED
+    live_canary_status: NOT_RUN
     last_canary_at:
     last_canary_error: "公开结构化入口待 live canary 验证，默认禁用。"
     known_limitations: "只允许列表摘要字段，不保存正文。"
@@ -238,6 +247,10 @@ sources:
       parser_version: generic_media_html_v1
       source_group: media_zh
       official: false
+      validate_dns_rebinding: false
+      request_headers:
+        User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36
+        Accept-Language: zh-CN,zh;q=0.9,en;q=0.8
 
   coindesk_rss:
     key: coindesk_rss
@@ -251,7 +264,7 @@ sources:
     language: en
     category: market
     trust_score: 72
-    poll_seconds: 300
+    poll_seconds: 30
     timeout_seconds: 15
     maximum_response_bytes: 1048576
     max_items_per_fetch: 20
@@ -281,24 +294,24 @@ sources:
     language: en
     category: market
     trust_score: 70
-    poll_seconds: 300
+    poll_seconds: 30
     timeout_seconds: 15
     maximum_response_bytes: 1048576
     max_items_per_fetch: 20
-    enabled: false
-    url: https://www.theblock.co/
-    canonical_url: https://www.theblock.co/
+    enabled: true
+    url: https://www.theblock.co/rss.xml
+    canonical_url: https://www.theblock.co/rss.xml
     parser_version: media_rss_v1
     supported_categories: [deep_article, market, funding, policy_regulatory, hack_security, project_update, token_unlock, onchain, exchange_repost]
-    live_canary_status: DISABLED
+    live_canary_status: NOT_RUN
     last_canary_at:
-    last_canary_error: "公开 RSS 或结构化接口待 live canary 验证，默认禁用。"
-    known_limitations: "不绕过付费墙或登录墙。"
+    last_canary_error: "The Block homepage returns 403 from this runtime; public RSS is reachable."
+    known_limitations: "RSS metadata only; article body and paywalled content are not stored."
     config:
       parser_version: media_rss_v1
       source_group: media_en
       official: false
-
+      validate_dns_rebinding: false
   decrypt_rss:
     key: decrypt_rss
     name: Decrypt RSS
@@ -311,7 +324,7 @@ sources:
     language: en
     category: market
     trust_score: 69
-    poll_seconds: 300
+    poll_seconds: 30
     timeout_seconds: 15
     maximum_response_bytes: 1048576
     max_items_per_fetch: 20
@@ -341,7 +354,7 @@ sources:
     language: en
     category: market
     trust_score: 68
-    poll_seconds: 300
+    poll_seconds: 30
     timeout_seconds: 15
     maximum_response_bytes: 1048576
     max_items_per_fetch: 20

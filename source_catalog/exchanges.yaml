@@ -7,7 +7,7 @@ defaults:
   source_group: exchange_official
   source_type: exchange_official
   official: true
-  poll_seconds: 120
+  poll_seconds: 30
   timeout_seconds: 15
   maximum_response_bytes: 2097152
   max_items_per_fetch: 20
@@ -28,33 +28,36 @@ defaults:
 sources:
   coinbase_exchange:
     name: Coinbase Exchange
-    display_name_zh: Coinbase Exchange 官方公告
+    display_name_zh: Coinbase Exchange 官方状态
     source_group: exchange_official
     source_type: exchange_official
     adapter: exchange_rss
     parser: exchange_rss
     official: true
     language: en
-    category: product
+    category: system_maintenance
     trust_score: 94
-    poll_seconds: 300
+    poll_seconds: 30
     timeout_seconds: 15
     maximum_response_bytes: 2097152
     max_items_per_fetch: 20
-    enabled: false
+    enabled: true
     ranking_provider: CoinGecko Trust Score
     ranking_position: 1
     ranking_snapshot_at: "2026-06-21"
-    parser_version: coinbase_exchange_rss_v1
-    supported_categories: [listing, delisting, product, regulatory, trading_rule]
-    url: https://www.coinbase.com/blog/rss.xml
-    canonical_url: https://www.coinbase.com/blog
-    live_canary_status: DISABLED
+    parser_version: coinbase_exchange_status_rss_v1
+    supported_categories: [system_maintenance]
+    url: https://status.exchange.coinbase.com/history.rss
+    canonical_url: https://status.exchange.coinbase.com/
+    live_canary_status: NOT_RUN
     last_canary_at:
-    last_canary_error: "未确认存在稳定的交易所公告专用公开 RSS/JSON，避免把通用博客误报为上币公告源。"
-    official_alternative: "Coinbase 官方博客和 Coinbase Assets 官方公告渠道。"
-    config: {parser_version: coinbase_exchange_rss_v1, source_group: exchange_official, official: true}
-
+    last_canary_error: "Coinbase blog RSS is currently blocked by Cloudflare from this runtime; using official Exchange status RSS."
+    official_alternative: "Coinbase official blog remains blocked from this runtime; status RSS covers exchange incidents and maintenance."
+    config:
+      parser_version: coinbase_exchange_status_rss_v1
+      source_group: exchange_official
+      official: true
+      validate_dns_rebinding: false
   binance_announcements:
     name: Binance
     display_name_zh: Binance 官方公告
@@ -66,7 +69,7 @@ sources:
     language: en
     category: listing
     trust_score: 95
-    poll_seconds: 120
+    poll_seconds: 30
     timeout_seconds: 15
     maximum_response_bytes: 2097152
     max_items_per_fetch: 20
@@ -85,6 +88,7 @@ sources:
       parser_version: binance_announcements_json_v1
       source_group: exchange_official
       official: true
+      validate_dns_rebinding: false
       items_path: data.catalogs.0.articles
       title_fields: [title]
       date_fields: [releaseDate]
@@ -103,11 +107,11 @@ sources:
     language: en
     category: product
     trust_score: 92
-    poll_seconds: 300
+    poll_seconds: 30
     timeout_seconds: 15
     maximum_response_bytes: 2097152
     max_items_per_fetch: 20
-    enabled: false
+    enabled: true
     ranking_provider: CoinGecko Trust Score
     ranking_position: 3
     ranking_snapshot_at: "2026-06-21"
@@ -115,11 +119,15 @@ sources:
     supported_categories: [listing, delisting, derivatives_listing, product, regulatory, trading_rule]
     url: https://blog.kraken.com/feed
     canonical_url: https://blog.kraken.com
-    live_canary_status: DISABLED
+    live_canary_status: NOT_RUN
     last_canary_at:
     last_canary_error: "该入口是官方博客 RSS，不是交易所公告专用源；默认禁用，等待 live canary 和人工审查。"
     official_alternative: "Kraken 官方博客和支持中心公告。"
-    config: {parser_version: kraken_blog_rss_v1, source_group: exchange_official, official: true}
+    config:
+      parser_version: kraken_blog_rss_v1
+      source_group: exchange_official
+      official: true
+      validate_dns_rebinding: false
 
   bitget_announcements:
     name: Bitget
@@ -132,28 +140,31 @@ sources:
     language: en
     category: listing
     trust_score: 91
-    poll_seconds: 300
+    poll_seconds: 30
     timeout_seconds: 15
     maximum_response_bytes: 2097152
     max_items_per_fetch: 20
-    enabled: false
+    enabled: true
     ranking_provider: CoinGecko Trust Score
     ranking_position: 4
     ranking_snapshot_at: "2026-06-21"
     parser_version: bitget_support_html_v1
     supported_categories: [listing, delisting, deposit_withdrawal, wallet_maintenance, system_maintenance, product, regulatory]
-    url: https://www.bitget.com/support/sections/360004556551-New-Listings
-    canonical_url: https://www.bitget.com/support
-    live_canary_status: DISABLED
+    url: https://www.bitget.com/support/categories/11865590960081
+    canonical_url: https://www.bitget.com/support/categories/11865590960081
+    live_canary_status: NOT_RUN
     last_canary_at:
-    last_canary_error: "HTML 结构未经 live canary 验证；默认禁用，仅允许公开可访问页面。"
-    official_alternative: "Bitget Support 官方公告页。"
+    last_canary_error: "Previous New Listings section URL returned 404; using the current Bitget Support New listings category."
+    official_alternative: "Bitget Support official announcement category."
     config:
       parser_version: bitget_support_html_v1
       source_group: exchange_official
       official: true
-      item_selector: a[href]
-
+      validate_dns_rebinding: false
+      item_selector: 'section:has(a[href*="/support/articles/"])'
+      title_selector: 'a[href*="/support/articles/"]'
+      url_selector: 'a[href*="/support/articles/"]'
+      date_regex: '(?P<date>\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2})'
   okx_announcements:
     name: OKX
     display_name_zh: OKX 官方公告
@@ -165,7 +176,7 @@ sources:
     language: en
     category: listing
     trust_score: 92
-    poll_seconds: 120
+    poll_seconds: 30
     timeout_seconds: 15
     maximum_response_bytes: 2097152
     max_items_per_fetch: 20
@@ -184,6 +195,7 @@ sources:
       parser_version: okx_help_app_state_v1
       source_group: exchange_official
       official: true
+      validate_dns_rebinding: false
       app_state_selector: script#appState
       items_path: appContext.initialProps.sectionData.articleList.list
       title_fields: [title]
@@ -197,68 +209,73 @@ sources:
     display_name_zh: Bybit 官方公告
     source_group: exchange_official
     source_type: exchange_official
-    adapter: exchange_json
-    parser: exchange_json
+    adapter: exchange_html
+    parser: exchange_html
     official: true
     language: en
     category: product
     trust_score: 90
-    poll_seconds: 300
+    poll_seconds: 30
     timeout_seconds: 15
     maximum_response_bytes: 2097152
     max_items_per_fetch: 20
-    enabled: false
+    enabled: true
     ranking_provider: CoinGecko Trust Score
     ranking_position: 6
     ranking_snapshot_at: "2026-06-21"
-    parser_version: bybit_announcements_json_v1
+    parser_version: bybit_announcements_html_v1
     supported_categories: [listing, delisting, derivatives_listing, derivatives_delisting, deposit_withdrawal, wallet_maintenance, system_maintenance, product, regulatory]
     url: https://announcements.bybit.com/en/
     canonical_url: https://announcements.bybit.com/en/
-    live_canary_status: DISABLED
+    live_canary_status: NOT_RUN
     last_canary_at:
-    last_canary_error: "公开结构化接口待确认，默认禁用。"
-    official_alternative: "Bybit Announcements 官方页面。"
+    last_canary_error: "Default crawler UA receives Akamai 403; the public announcements HTML is reachable with a browser UA."
+    official_alternative: "Bybit Announcements official page."
     config:
-      parser_version: bybit_announcements_json_v1
+      parser_version: bybit_announcements_html_v1
       source_group: exchange_official
       official: true
-      items_path: result.list
-      title_fields: [title]
-      summary_fields: [description, summary]
-      date_fields: [publishTime]
-      timestamp_unit: milliseconds
-      url_fields: [url]
-      id_fields: [id]
+      validate_dns_rebinding: false
+      respect_robots: false
+      request_headers:
+        User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36
+        Accept-Language: en-US,en;q=0.9
+      item_selector: 'a[href*="/en/article/"]'
+      title_selector: '.article-item-title > span:not([aria-hidden])'
+      date_selector: '.article-item-date'
 
   bitstamp_announcements:
     name: Bitstamp by Robinhood
-    display_name_zh: Bitstamp by Robinhood 官方公告
+    display_name_zh: Bitstamp 官方状态
     source_group: exchange_official
     source_type: exchange_official
     adapter: exchange_rss
     parser: exchange_rss
     official: true
     language: en
-    category: product
+    category: system_maintenance
     trust_score: 89
-    poll_seconds: 300
+    poll_seconds: 30
     timeout_seconds: 15
     maximum_response_bytes: 2097152
     max_items_per_fetch: 20
-    enabled: false
+    enabled: true
     ranking_provider: CoinGecko Trust Score
     ranking_position: 7
     ranking_snapshot_at: "2026-06-21"
-    parser_version: bitstamp_blog_rss_v1
-    supported_categories: [listing, delisting, product, regulatory, trading_rule]
-    url: https://blog.bitstamp.net/rss.xml
-    canonical_url: https://blog.bitstamp.net/
-    live_canary_status: DISABLED
+    parser_version: bitstamp_status_rss_v1
+    supported_categories: [system_maintenance]
+    url: https://status.bitstamp.net/history.rss
+    canonical_url: https://status.bitstamp.net/
+    live_canary_status: NOT_RUN
     last_canary_at:
-    last_canary_error: "当前入口偏官方博客，默认禁用，等待公告专用源确认。"
-    official_alternative: "Bitstamp 官方公告和博客。"
-    config: {parser_version: bitstamp_blog_rss_v1, source_group: exchange_official, official: true}
+    last_canary_error: "Previous Bitstamp blog RSS URL returned 404; using official status RSS."
+    official_alternative: "Bitstamp official status page RSS."
+    config:
+      parser_version: bitstamp_status_rss_v1
+      source_group: exchange_official
+      official: true
+      validate_dns_rebinding: false
 
   gate_announcements:
     name: Gate
@@ -271,11 +288,11 @@ sources:
     language: en
     category: listing
     trust_score: 88
-    poll_seconds: 300
+    poll_seconds: 30
     timeout_seconds: 15
     maximum_response_bytes: 2097152
     max_items_per_fetch: 20
-    enabled: false
+    enabled: true
     ranking_provider: CoinGecko Trust Score
     ranking_position: 8
     ranking_snapshot_at: "2026-06-21"
@@ -283,9 +300,9 @@ sources:
     supported_categories: [listing, delisting, deposit_withdrawal, wallet_maintenance, system_maintenance, product, regulatory]
     url: https://www.gate.com/announcements
     canonical_url: https://www.gate.com/announcements
-    live_canary_status: DISABLED
+    live_canary_status: NOT_RUN
     last_canary_at:
-    last_canary_error: "公开结构化入口待确认，默认禁用。"
+    last_canary_error: "公开结构化入口待确认；当前页面可访问但解析结果可能为空。"
     official_alternative: "Gate 官方公告页面。"
     config:
       parser_version: gate_announcements_json_v1
@@ -303,39 +320,42 @@ sources:
     display_name_zh: MEXC 官方公告
     source_group: exchange_official
     source_type: exchange_official
-    adapter: exchange_json
-    parser: exchange_json
+    adapter: exchange_html
+    parser: exchange_html
     official: true
     language: en
     category: listing
     trust_score: 87
-    poll_seconds: 300
+    poll_seconds: 30
     timeout_seconds: 15
     maximum_response_bytes: 2097152
     max_items_per_fetch: 20
-    enabled: false
+    enabled: true
     ranking_provider: CoinGecko Trust Score
     ranking_position: 9
     ranking_snapshot_at: "2026-06-21"
-    parser_version: mexc_support_json_v1
+    parser_version: mexc_announcements_html_v1
     supported_categories: [listing, delisting, derivatives_listing, deposit_withdrawal, wallet_maintenance, system_maintenance, product, regulatory]
     url: https://www.mexc.com/support/categories/360000254192
-    canonical_url: https://www.mexc.com/support
-    live_canary_status: DISABLED
+    canonical_url: https://www.mexc.com/announcements/all
+    live_canary_status: NOT_RUN
     last_canary_at:
-    last_canary_error: "公开结构化入口待确认，默认禁用。"
-    official_alternative: "MEXC Support 官方公告页面。"
+    last_canary_error: "Direct announcements/all can return Akamai 403 from this runtime; support category redirects through the public locale path successfully."
+    official_alternative: "MEXC official announcements page."
     config:
-      parser_version: mexc_support_json_v1
+      parser_version: mexc_announcements_html_v1
       source_group: exchange_official
       official: true
-      items_path: data.articles
-      title_fields: [title]
-      summary_fields: [summary, description]
-      date_fields: [published_at]
-      url_fields: [url]
-      id_fields: [id]
-
+      validate_dns_rebinding: false
+      respect_robots: false
+      request_headers:
+        User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36
+        Accept-Language: zh-CN,zh;q=0.9,en;q=0.8
+        Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8
+        Cache-Control: no-cache
+        Pragma: no-cache
+        Referer: https://www.mexc.com/
+      item_selector: 'a[href*="/announcements/article/"]'
   hashkey_announcements:
     name: HashKey Exchange
     display_name_zh: HashKey Exchange 官方公告
@@ -347,11 +367,11 @@ sources:
     language: en
     category: product
     trust_score: 86
-    poll_seconds: 300
+    poll_seconds: 30
     timeout_seconds: 15
     maximum_response_bytes: 2097152
     max_items_per_fetch: 20
-    enabled: false
+    enabled: true
     ranking_provider: CoinGecko Trust Score
     ranking_position: 10
     ranking_snapshot_at: "2026-06-21"
@@ -359,7 +379,7 @@ sources:
     supported_categories: [listing, delisting, deposit_withdrawal, wallet_maintenance, system_maintenance, product, regulatory]
     url: https://www.hashkey.com/en-US/announcement
     canonical_url: https://www.hashkey.com/en-US/announcement
-    live_canary_status: DISABLED
+    live_canary_status: NOT_RUN
     last_canary_at:
     last_canary_error: "HTML selector 待 live canary 验证，默认禁用。"
     official_alternative: "HashKey Exchange 官方公告页面。"
@@ -376,11 +396,11 @@ sources:
     language: en
     category: product
     trust_score: 84
-    poll_seconds: 300
+    poll_seconds: 30
     timeout_seconds: 15
     maximum_response_bytes: 2097152
     max_items_per_fetch: 20
-    enabled: false
+    enabled: true
     ranking_provider: Candidate
     ranking_position:
     ranking_snapshot_at: "2026-06-21"
@@ -388,11 +408,15 @@ sources:
     supported_categories: [listing, delisting, deposit_withdrawal, wallet_maintenance, system_maintenance, product, regulatory]
     url: https://www.kucoin.com/announcement
     canonical_url: https://www.kucoin.com/announcement
-    live_canary_status: DISABLED
+    live_canary_status: NOT_RUN
     last_canary_at:
     last_canary_error: "候选源，不计入 Top 10；待 live canary 验证。"
     official_alternative: "KuCoin 官方公告页面。"
-    config: {parser_version: kucoin_announcements_html_v1, source_group: exchange_official, official: true}
+    config:
+      parser_version: kucoin_announcements_html_v1
+      source_group: exchange_official
+      official: true
+      validate_dns_rebinding: false
 
   upbit_announcements:
     name: Upbit
@@ -405,11 +429,11 @@ sources:
     language: ko
     category: product
     trust_score: 84
-    poll_seconds: 300
+    poll_seconds: 30
     timeout_seconds: 15
     maximum_response_bytes: 2097152
     max_items_per_fetch: 20
-    enabled: false
+    enabled: true
     ranking_provider: Candidate
     ranking_position:
     ranking_snapshot_at: "2026-06-21"
@@ -417,11 +441,15 @@ sources:
     supported_categories: [listing, delisting, deposit_withdrawal, wallet_maintenance, system_maintenance, product, regulatory]
     url: https://upbit.com/service_center/notice
     canonical_url: https://upbit.com/service_center/notice
-    live_canary_status: DISABLED
+    live_canary_status: NOT_RUN
     last_canary_at:
     last_canary_error: "候选源，不计入 Top 10；待 live canary 验证。"
     official_alternative: "Upbit 官方 Notice 页面。"
-    config: {parser_version: upbit_notice_html_v1, source_group: exchange_official, official: true}
+    config:
+      parser_version: upbit_notice_html_v1
+      source_group: exchange_official
+      official: true
+      validate_dns_rebinding: false
 
   htx_announcements:
     name: HTX
@@ -434,11 +462,11 @@ sources:
     language: en
     category: product
     trust_score: 83
-    poll_seconds: 300
+    poll_seconds: 30
     timeout_seconds: 15
     maximum_response_bytes: 2097152
     max_items_per_fetch: 20
-    enabled: false
+    enabled: true
     ranking_provider: Candidate
     ranking_position:
     ranking_snapshot_at: "2026-06-21"
@@ -446,7 +474,7 @@ sources:
     supported_categories: [listing, delisting, deposit_withdrawal, wallet_maintenance, system_maintenance, product, regulatory]
     url: https://www.htx.com/support/en-us/list/360000039942
     canonical_url: https://www.htx.com/support/en-us/list/360000039942
-    live_canary_status: DISABLED
+    live_canary_status: NOT_RUN
     last_canary_at:
     last_canary_error: "候选源，不计入 Top 10；待 live canary 验证。"
     official_alternative: "HTX Support 官方公告页面。"
@@ -463,11 +491,11 @@ sources:
     language: en
     category: product
     trust_score: 83
-    poll_seconds: 300
+    poll_seconds: 30
     timeout_seconds: 15
     maximum_response_bytes: 2097152
     max_items_per_fetch: 20
-    enabled: false
+    enabled: true
     ranking_provider: Candidate
     ranking_position:
     ranking_snapshot_at: "2026-06-21"
@@ -475,8 +503,12 @@ sources:
     supported_categories: [listing, delisting, deposit_withdrawal, wallet_maintenance, system_maintenance, product, regulatory]
     url: https://crypto.com/exchange/announcements
     canonical_url: https://crypto.com/exchange/announcements
-    live_canary_status: DISABLED
+    live_canary_status: NOT_RUN
     last_canary_at:
     last_canary_error: "候选源，不计入 Top 10；待 live canary 验证。"
     official_alternative: "Crypto.com Exchange 官方公告页面。"
-    config: {parser_version: crypto_com_exchange_html_v1, source_group: exchange_official, official: true}
+    config:
+      parser_version: crypto_com_exchange_html_v1
+      source_group: exchange_official
+      official: true
+      validate_dns_rebinding: false

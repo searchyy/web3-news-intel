@@ -70,6 +70,7 @@ def parse_media_rss(source: SourceConfig, raw: RawDocumentPayload) -> list[Norma
                     title=title,
                     summary=summary,
                     original_url=url,
+                    official_confirmation=bool(source.config.get("official", False)),
                 ),
             )
         )

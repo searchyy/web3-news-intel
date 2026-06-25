@@ -1,6 +1,7 @@
 services:
   postgres:
     image: postgres:16-alpine
+    restart: unless-stopped
     environment:
       POSTGRES_USER: web3_news
       POSTGRES_PASSWORD: web3_news
@@ -49,7 +50,7 @@ services:
       retries: 20
       start_period: 10s
 
-  worker:
+  ai-worker:
     build: .
     env_file:
       - .env
@@ -63,12 +64,114 @@ services:
         condition: service_healthy
       api:
         condition: service_healthy
-    command: celery -A app.workers.celery_app worker --hostname=worker@%h --loglevel=INFO
+    command: >
+      celery -A app.workers.celery_app worker
+      --hostname=ai-worker@%h
+      --loglevel=INFO
+      --pool=threads
+      --concurrency=${AI_WORKER_CONCURRENCY:-2}
+      --queues=ai
     healthcheck:
       test:
         [
           "CMD-SHELL",
-          "celery -A app.workers.celery_app inspect ping -d worker@$$(hostname) | grep -q pong",
+          "celery -A app.workers.celery_app inspect ping -d ai-worker@$$(hostname) | grep -q pong",
+        ]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 20s
+
+  report-worker:
+    build: .
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://web3_news:web3_news@postgres:5432/web3_news_intel
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    command: >
+      celery -A app.workers.celery_app worker
+      --hostname=report-worker@%h
+      --loglevel=INFO
+      --pool=solo
+      --concurrency=1
+      --queues=report
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "celery -A app.workers.celery_app inspect ping -d report-worker@$$(hostname) | grep -q pong",
+        ]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 20s
+
+  fetch-worker:
+    build: .
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://web3_news:web3_news@postgres:5432/web3_news_intel
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    command: >
+      celery -A app.workers.celery_app worker
+      --hostname=fetch-worker@%h
+      --loglevel=INFO
+      --pool=threads
+      --concurrency=${FETCH_WORKER_CONCURRENCY:-8}
+      --queues=fetch
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "celery -A app.workers.celery_app inspect ping -d fetch-worker@$$(hostname) | grep -q pong",
+        ]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 20s
+
+  pipeline-worker:
+    build: .
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://web3_news:web3_news@postgres:5432/web3_news_intel
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    command: >
+      celery -A app.workers.celery_app worker
+      --hostname=pipeline-worker@%h
+      --loglevel=INFO
+      --pool=threads
+      --concurrency=${PIPELINE_WORKER_CONCURRENCY:-4}
+      --queues=pipeline,web3-news-intel
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "celery -A app.workers.celery_app inspect ping -d pipeline-worker@$$(hostname) | grep -q pong",
         ]
       interval: 15s
       timeout: 10s

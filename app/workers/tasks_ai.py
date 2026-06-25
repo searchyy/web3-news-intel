@@ -97,7 +97,7 @@ def summarize_event(
                 session.commit()
                 return {"status": job.status, "event_id": event_id, "job_id": job_id}
             session.commit()
-            raise
+            return {"status": "failed", "event_id": event_id, "job_id": job_id}
         except Exception as exc:
             if not _claim_failed(session, job, exc, request_id=request_id):
                 session.commit()
@@ -184,7 +184,7 @@ def summarize_event_batch(
                 session.commit()
                 return {"status": job.status, "job_id": job_id, "completed": completed}
             session.commit()
-            raise
+            return {"status": "failed", "job_id": job_id, "completed": completed}
         except Exception as exc:
             if not _claim_failed(session, job, exc, request_id=request_id):
                 session.commit()

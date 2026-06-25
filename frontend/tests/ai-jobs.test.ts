@@ -43,5 +43,12 @@ describe("AI job client", () => {
     expect(shouldWarnInputQuality("title_only")).toBe(true);
     expect(normalizeAiJobErrorMessage("Redis connection refused")).toContain("Redis 不可用");
     expect(normalizeAiJobErrorMessage("Celery worker heartbeat expired")).toContain("Celery Worker 未运行");
+
+  });
+
+
+  it("maps AI budget errors to a clear Chinese message", () => {
+    expect(normalizeAiJobErrorMessage("ai_budget_exceeded: AI daily token budget exceeded")).toContain("Token ?????");
+    expect(normalizeAiJobErrorMessage("AI daily request budget exceeded")).toContain("???????");
   });
 });

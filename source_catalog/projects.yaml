@@ -1,0 +1,294 @@
+policy:
+  copyright_mode: metadata_summary_link_only
+  disallowed_fields:
+    - full_article_body
+    - paywalled_content
+    - private_channel_content
+  default_requires_multisource_confirmation: true
+
+sources:
+  aster_medium:
+    name: Aster Medium
+    display_name_zh: Aster Official Medium
+    source_group: project_official
+    source_type: project_official
+    adapter: media_rss
+    parser: media_rss
+    official: true
+    language: en
+    category: project_update
+    trust_score: 88
+    poll_seconds: 30
+    timeout_seconds: 15
+    maximum_response_bytes: 1048576
+    max_items_per_fetch: 20
+    enabled: true
+    url: https://medium.com/feed/asterdex
+    canonical_url: https://medium.com/asterdex
+    parser_version: aster_medium_rss_v1
+    supported_categories: [project_update, market, token_unlock, exchange_repost]
+    live_canary_status: NOT_RUN
+    last_canary_at:
+    last_canary_error:
+    known_limitations: "Official Medium feed; captures Aster project announcements/articles, not third-party exchange listing bulletins."
+    config:
+      parser_version: aster_medium_rss_v1
+      source_group: project_official
+      official: true
+      max_items: 20
+
+  aster_product_releases:
+    name: Aster Product Releases
+    display_name_zh: Aster Product Releases
+    source_group: project_official
+    source_type: project_official
+    adapter: media_html
+    parser: aster_product_releases_html
+    official: true
+    language: en
+    category: project_update
+    trust_score: 86
+    poll_seconds: 30
+    timeout_seconds: 20
+    maximum_response_bytes: 2097152
+    max_items_per_fetch: 20
+    enabled: true
+    url: https://docs.asterdex.com/trading/product-releases
+    canonical_url: https://docs.asterdex.com/trading/product-releases
+    parser_version: aster_product_releases_html_v1
+    supported_categories: [project_update, market, token_unlock, exchange_repost]
+    live_canary_status: NOT_RUN
+    last_canary_at:
+    last_canary_error:
+    known_limitations: "Official GitBook docs page; releases are grouped by week, so published_at is the week-start date from the page."
+    config:
+      parser: aster_product_releases_html
+      parser_version: aster_product_releases_html_v1
+      source_group: project_official
+      official: true
+      max_items: 20
+
+  aster_api_docs_commits:
+    name: Aster API Docs Commits
+    display_name_zh: Aster API Docs Commits
+    source_group: project_official
+    source_type: project_official
+    adapter: media_rss
+    parser: media_rss
+    official: true
+    language: en
+    category: project_update
+    trust_score: 82
+    poll_seconds: 30
+    timeout_seconds: 15
+    maximum_response_bytes: 1048576
+    max_items_per_fetch: 10
+    enabled: true
+    url: https://github.com/asterdex/api-docs/commits/master.atom
+    canonical_url: https://github.com/asterdex/api-docs
+    parser_version: aster_api_docs_commits_atom_v1
+    supported_categories: [project_update]
+    live_canary_status: NOT_RUN
+    last_canary_at:
+    last_canary_error:
+    known_limitations: "Official API documentation repository commit feed; useful for API/doc changes, not marketing announcements."
+    config:
+      parser_version: aster_api_docs_commits_atom_v1
+      source_group: project_official
+      official: true
+      max_items: 10
+
+  hyperliquid_telegram_announcements:
+    name: Hyperliquid Announcements
+    display_name_zh: Hyperliquid Announcements
+    source_group: project_official
+    source_type: project_official
+    adapter: media_html
+    parser: telegram_channel_html
+    official: true
+    language: en
+    category: project_update
+    trust_score: 90
+    poll_seconds: 30
+    timeout_seconds: 20
+    maximum_response_bytes: 2097152
+    max_items_per_fetch: 20
+    enabled: true
+    url: https://t.me/s/hyperliquid_announcements
+    canonical_url: https://t.me/hyperliquid_announcements
+    parser_version: hyperliquid_telegram_channel_html_v1
+    supported_categories: [project_update, market, token_unlock, exchange_repost]
+    live_canary_status: NOT_RUN
+    last_canary_at:
+    last_canary_error:
+    known_limitations: "Official public Telegram announcement mirror; captures the latest public messages exposed by t.me/s."
+    config:
+      parser: telegram_channel_html
+      parser_version: hyperliquid_telegram_channel_html_v1
+      source_group: project_official
+      official: true
+      max_items: 20
+
+  backpack_blog:
+    name: Backpack Blog
+    display_name_zh: Backpack Blog
+    source_group: project_official
+    source_type: project_official
+    adapter: media_html
+    parser: backpack_blog_html
+    official: true
+    language: en
+    category: project_update
+    trust_score: 88
+    poll_seconds: 30
+    timeout_seconds: 20
+    maximum_response_bytes: 2097152
+    max_items_per_fetch: 20
+    enabled: true
+    url: https://learn.backpack.exchange/blog
+    canonical_url: https://learn.backpack.exchange/blog
+    parser_version: backpack_blog_html_v1
+    supported_categories: [project_update, market, token_unlock, exchange_repost]
+    live_canary_status: NOT_RUN
+    last_canary_at:
+    last_canary_error:
+    known_limitations: "Official Backpack Exchange and Wallet news page; cards without visible dates are skipped to avoid unknown published_at."
+    config:
+      parser: backpack_blog_html
+      parser_version: backpack_blog_html_v1
+      source_group: project_official
+      official: true
+      max_items: 20
+
+  backpack_status:
+    name: Backpack Status
+    display_name_zh: Backpack Status
+    source_group: project_official
+    source_type: project_official
+    adapter: media_html
+    parser: betterstack_status_html
+    official: true
+    language: en
+    category: system_maintenance
+    trust_score: 85
+    poll_seconds: 30
+    timeout_seconds: 15
+    maximum_response_bytes: 1048576
+    max_items_per_fetch: 5
+    enabled: true
+    url: https://status.backpack.exchange/
+    canonical_url: https://status.backpack.exchange/
+    parser_version: backpack_status_html_v1
+    supported_categories: [system_maintenance]
+    live_canary_status: NOT_RUN
+    last_canary_at:
+    last_canary_error:
+    known_limitations: "Official status page; emits an item only when the page is not all-green."
+    config:
+      parser: betterstack_status_html
+      parser_version: backpack_status_html_v1
+      source_group: project_official
+      official: true
+      max_items: 5
+
+  hyperliquid_news_search:
+    name: Hyperliquid/HYPE News Search
+    display_name_zh: Hyperliquid/HYPE News Search
+    source_group: project_news
+    source_type: news_aggregator
+    adapter: media_rss
+    parser: media_rss
+    official: false
+    language: en
+    category: market
+    trust_score: 55
+    poll_seconds: 30
+    timeout_seconds: 15
+    maximum_response_bytes: 1048576
+    max_items_per_fetch: 20
+    enabled: true
+    url: "https://news.google.com/rss/search?q=Hyperliquid%20OR%20HYPE%20crypto&hl=en-US&gl=US&ceid=US:en"
+    canonical_url: "https://news.google.com/search?q=Hyperliquid%20OR%20HYPE%20crypto"
+    parser_version: google_news_rss_v1
+    supported_categories: [market, project_update, exchange_repost, policy_regulatory, hack_security]
+    live_canary_status: NOT_RUN
+    last_canary_at:
+    last_canary_error: "Google News RSS was not promoted to enabled because local canary did not return a complete response through the current proxy path."
+    known_limitations: "Third-party news aggregator, not an official Hyperliquid announcement channel."
+    config:
+      parser_version: google_news_rss_v1
+      source_group: project_news
+      official: false
+      validate_dns_rebinding: false
+      request_headers:
+        User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36
+        Accept-Language: en-US,en;q=0.9
+      max_items: 20
+
+  aster_news_search:
+    name: Aster/ASTER News Search
+    display_name_zh: Aster/ASTER News Search
+    source_group: project_news
+    source_type: news_aggregator
+    adapter: media_rss
+    parser: media_rss
+    official: false
+    language: en
+    category: market
+    trust_score: 55
+    poll_seconds: 30
+    timeout_seconds: 15
+    maximum_response_bytes: 1048576
+    max_items_per_fetch: 20
+    enabled: true
+    url: "https://news.google.com/rss/search?q=Aster%20DEX%20OR%20ASTER%20crypto&hl=en-US&gl=US&ceid=US:en"
+    canonical_url: "https://news.google.com/search?q=Aster%20DEX%20OR%20ASTER%20crypto"
+    parser_version: google_news_rss_v1
+    supported_categories: [market, project_update, exchange_repost, policy_regulatory, hack_security]
+    live_canary_status: NOT_RUN
+    last_canary_at:
+    last_canary_error: "Google News RSS was not promoted to enabled because local canary did not return a complete response through the current proxy path."
+    known_limitations: "Third-party news aggregator; use official Aster sources for primary announcements."
+    config:
+      parser_version: google_news_rss_v1
+      source_group: project_news
+      official: false
+      validate_dns_rebinding: false
+      request_headers:
+        User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36
+        Accept-Language: en-US,en;q=0.9
+      max_items: 20
+
+  backpack_news_search:
+    name: Backpack/BP News Search
+    display_name_zh: Backpack/BP News Search
+    source_group: project_news
+    source_type: news_aggregator
+    adapter: media_rss
+    parser: media_rss
+    official: false
+    language: en
+    category: market
+    trust_score: 55
+    poll_seconds: 30
+    timeout_seconds: 15
+    maximum_response_bytes: 1048576
+    max_items_per_fetch: 20
+    enabled: true
+    url: "https://news.google.com/rss/search?q=Backpack%20exchange%20crypto%20OR%20BP%20DEX&hl=en-US&gl=US&ceid=US:en"
+    canonical_url: "https://news.google.com/search?q=Backpack%20exchange%20crypto%20OR%20BP%20DEX"
+    parser_version: google_news_rss_v1
+    supported_categories: [market, project_update, exchange_repost, policy_regulatory, hack_security]
+    live_canary_status: NOT_RUN
+    last_canary_at:
+    last_canary_error: "Google News RSS was not promoted to enabled because local canary did not return a complete response through the current proxy path."
+    known_limitations: "Assumes user shorthand BP means Backpack; third-party news aggregator, not an official Backpack announcement channel."
+    config:
+      parser_version: google_news_rss_v1
+      source_group: project_news
+      official: false
+      validate_dns_rebinding: false
+      request_headers:
+        User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36
+        Accept-Language: en-US,en;q=0.9
+      max_items: 20

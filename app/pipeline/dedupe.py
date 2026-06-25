@@ -43,6 +43,8 @@ class DedupeService:
         normalized = normalize_item(item)
         event_key = self.build_event_key(normalized)
         event = self.session.scalar(select(Event).where(Event.event_key == event_key))
+        if event is None:
+            event = self._find_event_by_url(normalized.canonical_url or normalized.url)
         source_score = (
             source.trust_score if source is not None else source_base_score(normalized.source_type)
         )
@@ -76,6 +78,22 @@ class DedupeService:
         self._refresh_score(event)
         return event
 
+    def _find_event_by_url(self, url: str | None) -> Event | None:
+        if not url:
+            return None
+        event = self.session.scalar(
+            select(Event)
+            .join(EventSource)
+            .where(EventSource.url == url)
+            .order_by(Event.id)
+            .limit(1)
+        )
+        if event is not None:
+            return event
+        return self.session.scalar(
+            select(Event).where(Event.primary_url == url).order_by(Event.id).limit(1)
+        )
+
     def _refresh_score(self, event: Event) -> None:
         event_sources = list(
             self.session.scalars(
@@ -89,6 +107,11 @@ class DedupeService:
         event.confirmation_count = result.confirmation_count
         metadata = dict(event.metadata_ or {})
         metadata["score_reasons"] = result.reasons
+        metadata["priority_score"] = result.priority_score
+        metadata["priority_tier"] = result.priority_tier
+        metadata["priority_reasons"] = result.reasons
+        metadata["noise_reasons"] = result.noise_reasons
+        metadata["cluster"] = _cluster_metadata(event_sources)
         event.metadata_ = metadata
 
     def _create_or_get_event(
@@ -164,3 +187,22 @@ class DedupeService:
                 self.session.flush()
         except IntegrityError:
             return
+
+
+def _cluster_metadata(event_sources: list[EventSource]) -> dict[str, object]:
+    source_keys: list[str] = []
+    source_groups: list[str] = []
+    urls: list[str] = []
+    for event_source in event_sources:
+        source = getattr(event_source, "source", None)
+        if source is not None:
+            source_keys.append(str(source.key))
+            source_groups.append(str(source.source_group or source.source_type))
+        if event_source.url:
+            urls.append(event_source.url)
+    return {
+        "source_count": len(set(source_keys)) or len(event_sources),
+        "source_keys": sorted(set(source_keys)),
+        "source_groups": sorted(set(source_groups)),
+        "url_count": len(set(urls)),
+    }

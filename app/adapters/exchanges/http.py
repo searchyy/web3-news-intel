@@ -2,13 +2,25 @@ from __future__ import annotations
 
 from app.core.config import SourceConfig
 from app.fetch.client import FetchClient
-from app.fetch.conditionals import conditional_request_headers, conditional_response_metadata
+from app.fetch.conditionals import conditional_response_metadata, source_request_headers
 from app.parsers.exchanges.html_parser import parse_html_announcements
 from app.parsers.exchanges.json_parser import parse_json_announcements
 from app.parsers.exchanges.rss_parser import parse_rss_announcements
 from app.pipeline.normalize import canonicalize_url
 from app.schemas.normalized_item import NormalizedItem
 from app.schemas.raw_document import RawDocumentPayload
+
+_ALLOWED_CONTENT_TYPES = (
+    "application/json",
+    "text/json",
+    "application/rss+xml",
+    "application/atom+xml",
+    "application/xml",
+    "text/xml",
+    "text/html",
+    "application/xhtml+xml",
+    "text/plain",
+)
 
 
 class ExchangeOfficialAdapter:
@@ -21,24 +33,14 @@ class ExchangeOfficialAdapter:
         last_modified: str | None = None,
         canary: bool = False,
     ) -> list[RawDocumentPayload]:
-        headers = conditional_request_headers(etag=etag, last_modified=last_modified)
+        headers = source_request_headers(source, etag=etag, last_modified=last_modified)
         response = await fetch_client.get_text(
             source.url,
             headers=headers or None,
             respect_robots=bool(
                 source.config.get("respect_robots", "html" in source.adapter)
             ),
-            allowed_content_types=(
-                "application/json",
-                "text/json",
-                "application/rss+xml",
-                "application/atom+xml",
-                "application/xml",
-                "text/xml",
-                "text/html",
-                "application/xhtml+xml",
-                "text/plain",
-            ),
+            allowed_content_types=_ALLOWED_CONTENT_TYPES,
         )
         return [
             RawDocumentPayload(

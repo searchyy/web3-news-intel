@@ -8,7 +8,8 @@ from sqlalchemy.orm import sessionmaker
 from app.core.errors import AccessDeniedError
 from app.core.time import utc_now
 from app.db.models import FetchRun, Source
-from app.scheduler.planner import due_sources, queue_due_sources
+from app.db.repositories.source_repo import SourceRepository
+from app.scheduler.planner import due_sources, mark_source_queued, queue_due_sources
 from app.workers import tasks_fetch
 
 
@@ -191,6 +192,63 @@ def test_fetch_failure_opens_circuit_and_success_clears_it(monkeypatch, db_sessi
         assert stored.health_status == "healthy"
         assert stored.consecutive_failures == 0
         assert stored.circuit_open_until is None
+
+
+def test_source_config_sync_preserves_runtime_health(db_session) -> None:
+    source = _source("runtime-health")
+    db_session.add(source)
+    db_session.commit()
+    source.health_status = "healthy"
+    config = tasks_fetch._source_to_config(source).model_copy(
+        update={"health_status": "unknown", "trust_score": 77}
+    )
+
+    SourceRepository(db_session).upsert_from_config(config)
+    db_session.commit()
+
+    stored = db_session.scalar(select(Source).where(Source.key == source.key))
+    assert stored is not None
+    assert stored.health_status == "healthy"
+    assert stored.trust_score == 77
+
+
+def test_source_config_can_disable_runtime_dns_rebinding_validation() -> None:
+    source = _source("proxy-dns")
+    source.parser_version = "test_v1"
+    config = tasks_fetch._source_to_config(source)
+    assert tasks_fetch._source_validate_dns_rebinding(config) is None
+
+    source.config = {"validate_dns_rebinding": False}
+    config = tasks_fetch._source_to_config(source)
+    assert tasks_fetch._source_validate_dns_rebinding(config) is False
+
+
+def test_manual_force_run_bypasses_open_circuit(monkeypatch, db_session) -> None:
+    source = _source("manual-force", circuit_open_until=utc_now() + timedelta(minutes=5))
+    source.etag = '"cached"'
+    source.last_modified = "Tue, 23 Jun 2026 00:00:00 GMT"
+    db_session.add(source)
+    db_session.commit()
+
+    fetch_run = mark_source_queued(db_session, source, trace_id="manual-force", force=True)
+    db_session.commit()
+    assert fetch_run is not None
+
+    session_local = _sessionmaker_for(db_session)
+    monkeypatch.setattr(tasks_fetch, "SessionLocal", session_local)
+
+    claim = tasks_fetch._claim_fetch_run(source.key, fetch_run_id=fetch_run.id, force=True)
+
+    with session_local() as session:
+        stored_source = session.scalar(select(Source).where(Source.key == source.key))
+        stored_run = session.get(FetchRun, fetch_run.id)
+        assert stored_source is not None
+        assert stored_run is not None
+        assert stored_source.circuit_open_until is None
+        assert stored_run.status == "running"
+    assert isinstance(claim, tasks_fetch._FetchClaim)
+    assert claim.etag is None
+    assert claim.last_modified is None
 
 
 def test_access_denied_disables_source_and_prevents_repeat_fetch(monkeypatch, db_session) -> None:

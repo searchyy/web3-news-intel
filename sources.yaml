@@ -1,6 +1,7 @@
 sources:
   sec_press:
     name: "SEC Press Releases"
+    source_group: "regulator_official"
     source_type: "regulator_official"
     adapter: "rss"
     url: "https://www.sec.gov/news/pressreleases.rss"
@@ -8,7 +9,7 @@ sources:
     category: "regulation"
     language: "en"
     trust_score: 100
-    poll_seconds: 300
+    poll_seconds: 30
     timeout_seconds: 15
     max_response_bytes: 2097152
     enabled: true
@@ -19,6 +20,7 @@ sources:
 
   cftc_press:
     name: "CFTC Press Releases"
+    source_group: "regulator_official"
     source_type: "regulator_official"
     adapter: "rss"
     url: "https://www.cftc.gov/RSS/RSSGP/rssgp.xml"
@@ -26,7 +28,7 @@ sources:
     category: "regulation"
     language: "en"
     trust_score: 100
-    poll_seconds: 300
+    poll_seconds: 30
     timeout_seconds: 15
     max_response_bytes: 2097152
     enabled: true
@@ -37,6 +39,7 @@ sources:
 
   ethereum_blog:
     name: "Ethereum Foundation Blog"
+    source_group: "protocol_official"
     source_type: "protocol_official"
     adapter: "rss"
     url: "https://blog.ethereum.org/feed.xml"
@@ -44,7 +47,7 @@ sources:
     category: "protocol"
     language: "en"
     trust_score: 95
-    poll_seconds: 300
+    poll_seconds: 30
     timeout_seconds: 15
     max_response_bytes: 2097152
     enabled: true
@@ -55,6 +58,7 @@ sources:
 
   coindesk:
     name: "CoinDesk RSS"
+    source_group: "media_en"
     source_type: "tier1_media"
     adapter: "rss"
     url: "https://www.coindesk.com/arc/outboundfeeds/rss/"
@@ -62,7 +66,7 @@ sources:
     category: "media"
     language: "en"
     trust_score: 75
-    poll_seconds: 180
+    poll_seconds: 30
     timeout_seconds: 15
     max_response_bytes: 2097152
     enabled: true
@@ -73,6 +77,7 @@ sources:
 
   defillama_hacks:
     name: "DefiLlama Hacks"
+    source_group: "onchain_data"
     source_type: "onchain_data"
     adapter: "json_api"
     url: "https://api.llama.fi/hacks"
@@ -80,7 +85,7 @@ sources:
     category: "security"
     language: "en"
     trust_score: 85
-    poll_seconds: 300
+    poll_seconds: 30
     timeout_seconds: 15
     max_response_bytes: 2097152
     enabled: true
@@ -96,6 +101,7 @@ sources:
 
   binance_listing:
     name: "Binance New Listings"
+    source_group: "exchange_official"
     source_type: "exchange_official"
     adapter: "json_api"
     url: "https://www.binance.info/bapi/composite/v1/public/cms/article/list/query?type=1&catalogId=48&pageNo=1&pageSize=20"
@@ -103,7 +109,7 @@ sources:
     category: "listing"
     language: "en"
     trust_score: 95
-    poll_seconds: 120
+    poll_seconds: 30
     timeout_seconds: 15
     max_response_bytes: 2097152
     enabled: true
@@ -111,6 +117,7 @@ sources:
     allow_localhost: false
     config:
       parser_version: "binance_announcements_json_v1"
+      validate_dns_rebinding: false
       items_path: "data.catalogs.0.articles"
       title_fields: ["title"]
       date_fields: ["releaseDate"]
@@ -120,6 +127,7 @@ sources:
 
   okx_listing:
     name: "OKX New Listings"
+    source_group: "exchange_official"
     source_type: "exchange_official"
     adapter: "html"
     url: "https://www.okx.com/help/section/announcements-new-listings"
@@ -127,7 +135,7 @@ sources:
     category: "listing"
     language: "en"
     trust_score: 92
-    poll_seconds: 120
+    poll_seconds: 30
     timeout_seconds: 15
     max_response_bytes: 2097152
     enabled: true
@@ -136,27 +144,34 @@ sources:
     config:
       parser: "okx_help_app_state"
       parser_version: "okx_help_app_state_v1"
+      validate_dns_rebinding: false
       items_path: "appContext.initialProps.sectionData.articleList.list"
       url_template: "https://www.okx.com/help/{slug}"
       max_items: 20
 
   blockbeats_newsflash:
     name: "BlockBeats Newsflash"
+    source_group: "media_zh"
     source_type: "chinese_media"
-    adapter: "html"
+    adapter: "media_html"
     url: "https://m.theblockbeats.info/newsflash"
     canonical_url: "https://m.theblockbeats.info/newsflash"
-    category: "media"
+    category: "newsflash"
     language: "zh"
     trust_score: 72
-    poll_seconds: 120
+    poll_seconds: 30
     timeout_seconds: 15
     max_response_bytes: 2097152
     enabled: true
     allow_private_networks: false
     allow_localhost: false
     config:
-      parser: "generic_html_listing"
+      parser: "blockbeats_newsflash_html"
       parser_version: "blockbeats_newsflash_html_v1"
       item_selector: "a[href^='/flash/']"
+      title_selector: ".news-flash-title-text"
+      url_selector: "a[href^='/flash/']"
+      summary_selector: ".news-flash-item-content"
+      date_group_selector: ".flash-list"
+      date_group_label_selector: ".flash-list-today"
       max_items: 20

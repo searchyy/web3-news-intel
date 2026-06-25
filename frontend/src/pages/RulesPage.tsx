@@ -65,8 +65,8 @@ export function RulesPage() {
         <Form.Item name="critical_bypass_quiet_hours" valuePropName="checked" initialValue={false}>
           <Switch checkedChildren="严重绕过" unCheckedChildren="不绕过" />
         </Form.Item>
-        <Button htmlType="submit" type="primary">
-          创建
+        <Button htmlType="submit" type="primary" aria-label="创建规则">
+          创建规则
         </Button>
       </Form>
       <Table

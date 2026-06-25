@@ -16,6 +16,12 @@ export type EventRow = {
   severity: string;
   status: string;
   trust_score: number;
+  confirmation_count?: number;
+  priority_score?: number;
+  priority_tier?: string;
+  source_count?: number;
+  score_reasons?: string[];
+  noise_reasons?: string[];
   symbols: string[];
   chains?: string[];
   entities?: string[];
@@ -57,6 +63,7 @@ export type EventFacets = {
   source_groups?: FacetOption[];
   categories?: FacetOption[];
   severities?: FacetOption[];
+  priority_tiers?: FacetOption[];
   statuses?: FacetOption[];
   symbols?: FacetOption[];
   chains?: FacetOption[];
@@ -132,10 +139,14 @@ export type AiSummarySubmitResponse = AiJob | EventAiInsight;
 
 export type AiRuntimeStatus = {
   mode?: "sync" | "async" | string;
+  execution_mode?: "sync" | "async" | string;
   status?: "healthy" | "degraded" | "unavailable" | string;
+  sync_allowed?: boolean;
   redis_available?: boolean;
   worker_available?: boolean;
   worker_heartbeat_at?: string | null;
+  queue_name?: string;
+  error?: string | null;
   message?: string | null;
   error_sanitized?: string | null;
 };

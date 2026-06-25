@@ -7,9 +7,10 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+import redis
 from celery.result import AsyncResult
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
-from sqlalchemy import func, select, update
+from sqlalchemy import func, or_, select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, object_session, selectinload
 
@@ -65,6 +66,7 @@ from app.integrations.feishu.errors import FeishuAuthenticationError
 from app.integrations.feishu.report_cards import event_ai_summary
 from app.integrations.feishu.reporting import FeishuReportService, next_run_at
 from app.integrations.feishu.token_provider import FeishuTokenProvider
+from app.pipeline.event_pipeline import build_event_pipeline, load_event_for_pipeline
 from app.publishers.feishu import publish_feishu_once
 from app.scheduler.planner import mark_source_queued
 from app.schemas.admin import (
@@ -122,6 +124,7 @@ from app.schemas.feishu_report import (
     ReportScheduleRead,
     ReportSendResultRead,
 )
+from app.schemas.pipeline import EventPipelineRead
 from app.schemas.source import SourceRead
 from app.workers.celery_app import celery_app
 from app.workers.tasks_feishu_reports import run_feishu_report_schedule
@@ -305,12 +308,17 @@ def admin_events(
     languages: list[str] | None = Query(default=None),
     official_only: bool | None = None,
     minimum_trust_score: int | None = Query(default=None, ge=0, le=100),
+    maximum_trust_score: int | None = Query(default=None, ge=0, le=100),
+    minimum_priority_score: int | None = Query(default=None, ge=0, le=100),
+    maximum_priority_score: int | None = Query(default=None, ge=0, le=100),
+    minimum_ai_importance_score: int | None = Query(default=None, ge=0, le=100),
+    priority_tiers: list[str] | None = Query(default=None),
     has_ai_summary: bool | None = None,
     published_from: datetime | None = None,
     published_to: datetime | None = None,
     first_seen_from: datetime | None = None,
     first_seen_to: datetime | None = None,
-    sort: str = Query(default="published_at"),
+    sort: str = Query(default="first_seen_at"),
     direction: str = Query(default="desc", pattern="^(asc|desc)$"),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=500),
@@ -335,6 +343,11 @@ def admin_events(
         languages=languages,
         official_only=official_only,
         minimum_trust_score=minimum_trust_score,
+        maximum_trust_score=maximum_trust_score,
+        minimum_priority_score=minimum_priority_score,
+        maximum_priority_score=maximum_priority_score,
+        minimum_ai_importance_score=minimum_ai_importance_score,
+        priority_tiers=priority_tiers,
         has_ai_summary=has_ai_summary,
         published_from=published_from,
         published_to=published_to,
@@ -367,12 +380,17 @@ def admin_event_facets(
     languages: list[str] | None = Query(default=None),
     official_only: bool | None = None,
     minimum_trust_score: int | None = Query(default=None, ge=0, le=100),
+    maximum_trust_score: int | None = Query(default=None, ge=0, le=100),
+    minimum_priority_score: int | None = Query(default=None, ge=0, le=100),
+    maximum_priority_score: int | None = Query(default=None, ge=0, le=100),
+    minimum_ai_importance_score: int | None = Query(default=None, ge=0, le=100),
+    priority_tiers: list[str] | None = Query(default=None),
     has_ai_summary: bool | None = None,
     published_from: datetime | None = None,
     published_to: datetime | None = None,
     first_seen_from: datetime | None = None,
     first_seen_to: datetime | None = None,
-    sort: str = Query(default="published_at"),
+    sort: str = Query(default="first_seen_at"),
     direction: str = Query(default="desc", pattern="^(asc|desc)$"),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=500),
@@ -392,6 +410,11 @@ def admin_event_facets(
         languages=languages,
         official_only=official_only,
         minimum_trust_score=minimum_trust_score,
+        maximum_trust_score=maximum_trust_score,
+        minimum_priority_score=minimum_priority_score,
+        maximum_priority_score=maximum_priority_score,
+        minimum_ai_importance_score=minimum_ai_importance_score,
+        priority_tiers=priority_tiers,
         has_ai_summary=has_ai_summary,
         published_from=published_from,
         published_to=published_to,
@@ -490,6 +513,20 @@ def admin_event_detail(
     return EventDetail.model_validate(event)
 
 
+@router.get("/events/{event_id}/pipeline", response_model=EventPipelineRead)
+def admin_event_pipeline(
+    event_id: int,
+    _: AdminPrincipal = Depends(require_admin_session),
+    session: Session = Depends(get_session),
+) -> EventPipelineRead:
+    event = load_event_for_pipeline(session, event_id)
+    if event is None:
+        raise HTTPException(status_code=404, detail="事件不存在")
+    if mark_stale_ai_runs(session):
+        session.commit()
+    return build_event_pipeline(session, event)
+
+
 @router.post("/events/{event_id}/republish")
 def admin_republish_event(
     event_id: int,
@@ -586,7 +623,7 @@ def run_source(
         return {"queued": False, "source_key": source.key}
     _audit(session, principal, request, "run", "source", str(source_id), {"source_key": source.key})
     session.commit()
-    queued = enqueue_fetch_run(source.key, fetch_run.id)
+    queued = enqueue_fetch_run(source.key, fetch_run.id, force=True)
     return {"queued": queued, "source_key": source.key}
 
 
@@ -1175,15 +1212,17 @@ def queue_event_ai_summary_batch(
     )
 
 
-@router.get("/events/{event_id}/ai-insight", response_model=EventAIInsightRead)
+@router.get("/events/{event_id}/ai-insight", response_model=EventAIInsightRead | None)
 def get_event_ai_insight(
     event_id: int,
     _: AdminPrincipal = Depends(require_admin_session),
     session: Session = Depends(get_session),
-) -> EventAIInsightRead:
+) -> EventAIInsightRead | None:
+    if session.get(Event, event_id) is None:
+        raise HTTPException(status_code=404, detail="event not found")
     insight = AIService(session).latest_insight(event_id)
     if insight is None:
-        raise HTTPException(status_code=404, detail="AI insight not found")
+        return None
     return EventAIInsightRead.model_validate(insight)
 
 
@@ -1246,7 +1285,7 @@ def retry_ai_job(
         session.refresh(job)
         raise HTTPException(
             status_code=409,
-            detail="AI 浠诲姟鐘舵€佸凡鍙樺寲锛岃鍒锋柊鍚庡啀閲嶈瘯",
+            detail="AI 任务状态已变化，请刷新后再重试",
         )
     session.commit()
     session.refresh(job)
@@ -1530,9 +1569,12 @@ def create_rule(
     principal: AdminPrincipal = Depends(require_admin_session),
     session: Session = Depends(get_session),
 ) -> RuleRead:
-    if session.get(NotificationDestination, payload.destination_id) is None:
-        raise HTTPException(status_code=404, detail="destination not found")
+    destination = session.get(NotificationDestination, payload.destination_id)
+    if destination is None:
+        raise HTTPException(status_code=404, detail="通知目标不存在")
     rule = NotificationRule(**payload.model_dump())
+    if rule.enabled:
+        destination.activated_at = utc_now()
     session.add(rule)
     session.flush()
     _audit(session, principal, request, "create", "rule", str(rule.id), {})
@@ -1555,6 +1597,8 @@ def patch_rule(
     update = payload.model_dump(exclude_unset=True)
     for field, value in update.items():
         setattr(rule, field, value)
+    if update.get("enabled") is True and rule.destination:
+        rule.destination.activated_at = utc_now()
     _audit(session, principal, request, "update", "rule", str(rule_id), {"fields": list(update)})
     session.commit()
     return RuleRead.model_validate(rule)
@@ -1627,6 +1671,8 @@ def retry_delivery(
     delivery = session.get(Delivery, delivery_id)
     if delivery is None:
         raise HTTPException(status_code=404, detail="delivery not found")
+    if delivery.status == "delivered":
+        return {"delivery_id": delivery_id, "queued": False}
     delivery.status = "pending"
     republish_event.delay(delivery.event_id)
     _audit(session, principal, request, "retry", "delivery", str(delivery_id), {})
@@ -1635,8 +1681,31 @@ def retry_delivery(
 
 
 @router.get("/system/health")
-def system_health(_: AdminPrincipal = Depends(require_admin_session)) -> dict:
-    return {"api": "ok", "postgresql": "configured", "redis": "configured", "celery": "configured"}
+def system_health(
+    _: AdminPrincipal = Depends(require_admin_session),
+    session: Session = Depends(get_session),
+) -> dict[str, str]:
+    db_health = _check_db_health(session)
+    redis_health = _check_redis_ping(settings.redis_url)
+    celery_health = _check_celery_ping()
+    probes = {
+        "postgresql": db_health,
+        "redis": redis_health,
+        "celery": celery_health,
+    }
+    errors = _system_probe_errors(probes)
+    degraded = any(probe["status"] != "ok" for probe in probes.values())
+    payload = {
+        "api": "ok",
+        "postgresql": db_health["status"] or "unknown",
+        "redis": redis_health["status"] or "unknown",
+        "celery": celery_health["status"] or "unknown",
+        "status": "degraded" if degraded else "ok",
+        "degraded": "true" if degraded else "false",
+    }
+    if errors:
+        payload["error"] = "; ".join(errors)
+    return payload
 
 
 @router.get("/system/ai-runtime", response_model=AIRuntimeStatus)
@@ -1646,12 +1715,53 @@ def ai_runtime_status(_: AdminPrincipal = Depends(require_admin_session)) -> AIR
 
 @router.get("/system/queues")
 def system_queues(_: AdminPrincipal = Depends(require_admin_session)) -> dict:
-    return {"queues": [{"name": "web3-news-intel", "depth": None}]}
+    queue_name = _celery_default_queue_name()
+    queue_health = _read_celery_default_queue_depth(queue_name)
+    queue = {
+        "name": queue_name,
+        "depth": queue_health["depth"],
+        "status": queue_health["status"],
+        "error": queue_health["error"],
+    }
+    degraded = queue_health["status"] != "ok"
+    return {
+        "queues": [queue],
+        "status": "degraded" if degraded else "ok",
+        "degraded": degraded,
+        "error": queue_health["error"],
+    }
 
 
 @router.get("/system/canary-runs")
-def canary_runs(_: AdminPrincipal = Depends(require_admin_session)) -> dict:
-    return {"runs": []}
+def canary_runs(
+    _: AdminPrincipal = Depends(require_admin_session),
+    session: Session = Depends(get_session),
+) -> dict:
+    rows = session.scalars(
+        select(Source)
+        .where(
+            or_(
+                Source.last_canary_at.is_not(None),
+                Source.live_canary_status != "unknown",
+            )
+        )
+        .order_by(Source.last_canary_at.desc().nullslast(), Source.key.asc())
+        .limit(50)
+    )
+    return {
+        "runs": [
+            {
+                "source_key": source.key,
+                "source_name": source.display_name_zh or source.name,
+                "status": source.live_canary_status,
+                "last_canary_at": source.last_canary_at.isoformat()
+                if source.last_canary_at
+                else None,
+                "error": source.last_canary_error,
+            }
+            for source in rows
+        ]
+    }
 
 
 @router.get("/audit-logs", response_model=AuditLogPage)
@@ -1680,6 +1790,117 @@ def audit_logs(
     )
 
 
+def _check_db_health(session: Session) -> dict[str, str | None]:
+    try:
+        value = session.execute(text("select 1")).scalar()
+    except Exception as exc:
+        return {"status": "error", "error": _format_probe_error(exc)}
+    if str(value) == "1":
+        return {"status": "ok", "error": None}
+    return {"status": "degraded", "error": f"select 1 returned {value!r}"}
+
+
+def _check_redis_ping(redis_url: str | None) -> dict[str, str | None]:
+    if not redis_url:
+        return {"status": "unknown", "error": "redis url is not configured"}
+    client: Any | None = None
+    try:
+        client = redis.Redis.from_url(
+            redis_url,
+            socket_connect_timeout=1.0,
+            socket_timeout=1.0,
+        )
+        client.ping()
+    except Exception as exc:
+        return {"status": "error", "error": _format_probe_error(exc)}
+    finally:
+        _close_redis_client(client)
+    return {"status": "ok", "error": None}
+
+
+def _check_celery_ping() -> dict[str, str | None]:
+    try:
+        inspector = celery_app.control.inspect(timeout=1.0)
+        replies = inspector.ping() if inspector is not None else None
+    except Exception as exc:
+        return {"status": "error", "error": _format_probe_error(exc)}
+    if not replies:
+        return {"status": "degraded", "error": "no celery worker ping replies"}
+    return {"status": "ok", "error": None}
+
+
+def _system_probe_errors(probes: dict[str, dict[str, str | None]]) -> list[str]:
+    errors: list[str] = []
+    for name, probe in probes.items():
+        error = probe.get("error")
+        if error:
+            errors.append(f"{name}: {error}")
+    return errors
+
+
+def _read_celery_default_queue_depth(queue_name: str) -> dict[str, Any]:
+    broker_url = _celery_broker_url()
+    if not broker_url:
+        return {
+            "status": "unknown",
+            "depth": None,
+            "error": "celery broker url is not configured",
+        }
+    if not _is_redis_url(broker_url):
+        return {
+            "status": "unknown",
+            "depth": None,
+            "error": "celery broker is not redis-backed",
+        }
+
+    client: Any | None = None
+    try:
+        client = redis.Redis.from_url(
+            broker_url,
+            socket_connect_timeout=1.0,
+            socket_timeout=1.0,
+        )
+        client.ping()
+        depth = int(client.llen(queue_name))
+    except Exception as exc:
+        return {"status": "error", "depth": None, "error": _format_probe_error(exc)}
+    finally:
+        _close_redis_client(client)
+    return {"status": "ok", "depth": depth, "error": None}
+
+
+def _celery_default_queue_name() -> str:
+    return str(getattr(celery_app.conf, "task_default_queue", None) or "celery")
+
+
+def _celery_broker_url() -> str:
+    broker_url = (
+        getattr(celery_app.conf, "broker_url", None)
+        or settings.celery_broker_url
+        or settings.redis_url
+    )
+    return str(broker_url or "")
+
+
+def _is_redis_url(url: str) -> bool:
+    return url.lower().startswith(("redis://", "rediss://", "unix://"))
+
+
+def _close_redis_client(client: Any | None) -> None:
+    if client is None:
+        return
+    close = getattr(client, "close", None)
+    if close is not None:
+        close()
+
+
+def _format_probe_error(exc: BaseException) -> str:
+    message = str(exc).strip()
+    if message:
+        return f"{type(exc).__name__}: {message}"[:200]
+    return type(exc).__name__
+
+
 def _event_search_params(
     *,
     q: str | None,
@@ -1694,6 +1915,11 @@ def _event_search_params(
     languages: list[str] | None,
     official_only: bool | None,
     minimum_trust_score: int | None,
+    maximum_trust_score: int | None,
+    minimum_priority_score: int | None,
+    maximum_priority_score: int | None,
+    minimum_ai_importance_score: int | None,
+    priority_tiers: list[str] | None,
     has_ai_summary: bool | None,
     published_from: datetime | None,
     published_to: datetime | None,
@@ -1726,6 +1952,11 @@ def _event_search_params(
         languages=languages or [],
         official_only=official_only,
         minimum_trust_score=minimum_trust_score,
+        maximum_trust_score=maximum_trust_score,
+        minimum_priority_score=minimum_priority_score,
+        maximum_priority_score=maximum_priority_score,
+        minimum_ai_importance_score=minimum_ai_importance_score,
+        priority_tiers=priority_tiers,
         has_ai_summary=has_ai_summary,
         published_from=published_from,
         published_to=published_to,
@@ -1896,6 +2127,7 @@ def _normalize_event_sort(sort: str, direction: str) -> tuple[str, str]:
         "first_seen_at",
         "last_seen_at",
         "trust_score",
+        "priority_score",
         "severity",
         "confirmation_count",
         "id",

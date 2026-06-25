@@ -1,4 +1,5 @@
 import {
+  Alert,
   Button,
   Descriptions,
   Form,
@@ -39,6 +40,7 @@ import type {
   ReportSchedule,
   ReportSendResult,
   ReportType,
+  Rule,
   SavedSearch
 } from "../types/api";
 
@@ -66,6 +68,12 @@ type ScheduleFormValues = {
   minimum_trust_score?: number | null;
   include_ai_summary: boolean;
   maximum_events: number;
+};
+
+type ImmediateRuleFormValues = {
+  destination_id?: string;
+  name: string;
+  minimum_severity: string;
 };
 
 const reportTypeOptions: Array<{ value: ReportType; label: string }> = [
@@ -137,8 +145,10 @@ export function FeishuGroupsPage() {
   const [editingSchedule, setEditingSchedule] = useState<ReportSchedule | null>(null);
   const [scheduleModalOpen, setScheduleModalOpen] = useState(false);
   const [preview, setPreview] = useState<ReportPreview | null>(null);
+  const [ruleModalOpen, setRuleModalOpen] = useState(false);
   const [webhookForm] = Form.useForm<WebhookFormValues>();
   const [scheduleForm] = Form.useForm<ScheduleFormValues>();
+  const [ruleForm] = Form.useForm<ImmediateRuleFormValues>();
 
   const destinationsQuery = useQuery({
     queryKey: ["destinations"],
@@ -279,6 +289,21 @@ export function FeishuGroupsPage() {
     onSuccess: (result) => {
       message.success(result.dry_run ? "测试汇报已生成，当前为 dry-run" : "测试汇报已发送到 Mock/配置目标");
       queryClient.invalidateQueries({ queryKey: ["report-schedules"] });
+    }
+  });
+
+  const createImmediateRule = useMutation({
+    mutationFn: (values: ImmediateRuleFormValues) =>
+      api<Rule>("/api/admin/rules", {
+        method: "POST",
+        csrf,
+        body: JSON.stringify(buildImmediateRulePayload(values))
+      }),
+    onSuccess: () => {
+      message.success("即时通知规则已创建，默认停用，请到告警规则页启用。");
+      setRuleModalOpen(false);
+      ruleForm.resetFields();
+      queryClient.invalidateQueries({ queryKey: ["rules"] });
     }
   });
 
@@ -477,6 +502,9 @@ export function FeishuGroupsPage() {
           <Button icon={<PlusOutlined />} onClick={() => setCreatingWebhook(true)}>
             添加飞书 Webhook
           </Button>
+          <Button icon={<PlusOutlined />} onClick={openCreateImmediateRule}>
+            创建即时通知规则
+          </Button>
           <Button type="primary" icon={<PlusOutlined />} onClick={openCreateSchedule}>
             新建汇报规则
           </Button>
@@ -521,7 +549,8 @@ export function FeishuGroupsPage() {
         open={creatingWebhook}
         footer={null}
         onCancel={() => setCreatingWebhook(false)}
-        destroyOnClose
+        destroyOnHidden
+        forceRender
       >
         <Form form={webhookForm} layout="vertical" onFinish={(values) => createWebhook.mutate(values)}>
           <Form.Item label="Key" name="key" rules={[{ required: true, message: "请输入唯一 Key" }]}>
@@ -551,7 +580,8 @@ export function FeishuGroupsPage() {
           setScheduleModalOpen(false);
           setEditingSchedule(null);
         }}
-        destroyOnClose
+        destroyOnHidden
+        forceRender
       >
         <Form form={scheduleForm} layout="vertical" onFinish={(values) => saveSchedule.mutate(values)}>
           <Space wrap align="start" className="form-grid">
@@ -638,6 +668,44 @@ export function FeishuGroupsPage() {
       </Modal>
 
       <Modal
+        title="创建即时通知规则"
+        open={ruleModalOpen}
+        okText="创建规则"
+        cancelText="取消"
+        confirmLoading={createImmediateRule.isPending}
+        onOk={() => ruleForm.submit()}
+        onCancel={() => setRuleModalOpen(false)}
+        destroyOnHidden
+        forceRender
+      >
+        <Alert
+          type="info"
+          showIcon
+          message="规则默认停用，启用后只匹配新事件。"
+          description="AI 失败时会使用确定性模板卡片兜底，不会发送启用前的历史事件。"
+        />
+        <Form
+          form={ruleForm}
+          layout="vertical"
+          onFinish={(values) => createImmediateRule.mutate(values)}
+          className="form-section"
+        >
+          <Form.Item label="飞书群组" name="destination_id" rules={[{ required: true, message: "请选择飞书群组" }]}>
+            <Select
+              placeholder="选择目标群组"
+              options={feishuDestinations.map((item) => ({ value: item.id, label: item.name }))}
+            />
+          </Form.Item>
+          <Form.Item label="规则名称" name="name" rules={[{ required: true, message: "请输入规则名称" }]}>
+            <Input placeholder="例如：高风险事件即时通知" />
+          </Form.Item>
+          <Form.Item label="最低级别" name="minimum_severity" initialValue="high">
+            <Select options={severityOptions.filter((item) => item.value !== "medium")} />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal
         title="飞书汇报预览"
         open={Boolean(preview)}
         width={820}
@@ -657,6 +725,11 @@ export function FeishuGroupsPage() {
     setEditingSchedule(null);
     scheduleForm.setFieldsValue(defaultScheduleValues(feishuDestinations[0]?.id));
     setScheduleModalOpen(true);
+  }
+
+  function openCreateImmediateRule() {
+    ruleForm.setFieldsValue(defaultImmediateRuleValues(feishuDestinations[0]?.id));
+    setRuleModalOpen(true);
   }
 
   function openEditSchedule(schedule: ReportSchedule) {
@@ -783,6 +856,31 @@ function buildSchedulePayload(values: ScheduleFormValues, editing: boolean) {
     payload.destination_id = values.destination_id;
   }
   return payload;
+}
+
+function defaultImmediateRuleValues(destinationId?: string): ImmediateRuleFormValues {
+  return {
+    destination_id: destinationId,
+    name: "",
+    minimum_severity: "high"
+  };
+}
+
+function buildImmediateRulePayload(values: ImmediateRuleFormValues) {
+  return {
+    destination_id: values.destination_id,
+    name: values.name,
+    enabled: false,
+    minimum_severity: values.minimum_severity || "high",
+    categories: [],
+    sources: [],
+    symbols: [],
+    chains: [],
+    delivery_mode: "immediate",
+    timezone: "UTC",
+    maximum_messages_per_hour: 30,
+    critical_bypass_quiet_hours: false
+  };
 }
 
 function normalizeNullableNumber(value?: number | null) {

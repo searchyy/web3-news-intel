@@ -72,6 +72,7 @@ def parse_media_json(source: SourceConfig, raw: RawDocumentPayload) -> list[Norm
                     title=title,
                     summary=summary,
                     original_url=url,
+                    official_confirmation=bool(source.config.get("official", False)),
                 ),
             )
         )

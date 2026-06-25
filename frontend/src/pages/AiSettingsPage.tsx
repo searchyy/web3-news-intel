@@ -22,7 +22,7 @@ import { aiApi, aiErrorMessage } from "../api/ai";
 import { api } from "../api/client";
 import { normalizePaginated } from "../api/pagination";
 import { useAuth } from "../auth/AuthContext";
-import type { AiModelInfo, AiModelsResponse, AiProviderConfig, AiRun, PaginatedResponse } from "../types/api";
+import type { AiModelInfo, AiModelsResponse, AiProviderConfig, AiRun, AiRuntimeStatus, PaginatedResponse } from "../types/api";
 
 const DEEPSEEK_API_BASE = "https://api.deepseek.com";
 const CONFIG_QUERY_KEY = ["ai-provider", "deepseek"] as const;
@@ -98,6 +98,13 @@ export function AiSettingsPage() {
     },
     retry: false,
     staleTime: 30_000
+  });
+
+  const runtimeQuery = useQuery({
+    queryKey: ["ai-runtime"],
+    queryFn: () => aiApi<AiRuntimeStatus>("/api/admin/system/ai-runtime"),
+    retry: false,
+    staleTime: 15_000
   });
 
   useEffect(() => {
@@ -219,6 +226,24 @@ export function AiSettingsPage() {
           showIcon
           message="AI 后端接口暂不可用"
           description={aiErrorMessage(configQuery.error, "页面已保留配置入口，后端接口恢复后即可联调。")}
+        />
+      ) : null}
+
+      {runtimeMode(runtimeQuery.data) === "sync" ? (
+        <Alert
+          type="info"
+          showIcon
+          message="当前为同步开发模式，生成需要等待模型返回。"
+          description="切换到 async 后，生成请求会快速返回任务编号，并由前端轮询任务状态。"
+        />
+      ) : null}
+
+      {runtimeMode(runtimeQuery.data) === "async" && runtimeQuery.data?.status === "degraded" ? (
+        <Alert
+          type="warning"
+          showIcon
+          message="AI 异步运行环境不可用"
+          description={runtimeQuery.data.error || runtimeQuery.data.message || "请检查 Redis 和 Celery AI Worker 是否已启动。"}
         />
       ) : null}
 
@@ -401,6 +426,10 @@ function modelCacheScopeFor(config?: AiProviderConfig) {
     return `masked:${config.api_key_masked}`;
   }
   return "configured";
+}
+
+function runtimeMode(status?: AiRuntimeStatus) {
+  return status?.execution_mode ?? status?.mode;
 }
 
 function withoutApiKey(config?: AiProviderConfig): AiProviderConfig {

@@ -72,6 +72,38 @@ def test_input_builder_marks_summary_and_multi_source_quality() -> None:
     assert payload.source_names == ["BlockBeats Newsflash", "CoinDesk"]
 
 
+def test_input_builder_limits_urls_to_three_event_sources() -> None:
+    event = _event(summary="A public BTC summary.")
+    event.primary_url = "https://primary.example/not-evidence"
+    for index in range(4):
+        source = _source(
+            f"source-{index}",
+            f"Source {index}",
+            f"https://source.example/{index}",
+        )
+        event.sources.append(
+            EventSource(
+                source=source,
+                url=f"https://source.example/{index}",
+                title=f"Source title {index}",
+                published_at=event.published_at,
+                source_score=70,
+            )
+        )
+
+    payload = build_event_input(event)
+    serialized = json.dumps(payload.model_dump(mode="json"), ensure_ascii=False)
+
+    assert payload.source_urls == [
+        "https://example.com/btc",
+        "https://source.example/0",
+        "https://source.example/1",
+    ]
+    assert payload.original_urls == payload.source_urls
+    assert "primary.example" not in serialized
+    assert "https://source.example/2" not in serialized
+
+
 def test_input_builder_bounds_excerpts_and_metadata() -> None:
     event = _event(summary="S" * 1500)
     event.metadata_ = {"safe": "M" * 5000, "api_token": "secret"}

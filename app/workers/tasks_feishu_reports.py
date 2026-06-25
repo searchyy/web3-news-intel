@@ -9,10 +9,14 @@ from app.core.time import utc_now
 from app.db.models import ReportSchedule
 from app.db.session import SessionLocal
 from app.integrations.feishu.reporting import FeishuReportService, due_schedules
-from app.workers.celery_app import celery_app
+from app.workers.celery_app import CELERY_REPORT_PRIORITY, CELERY_REPORT_QUEUE, celery_app
 
 
-@celery_app.task(name="app.workers.tasks_feishu_reports.run_due_feishu_reports")
+@celery_app.task(
+    name="app.workers.tasks_feishu_reports.run_due_feishu_reports",
+    queue=CELERY_REPORT_QUEUE,
+    priority=CELERY_REPORT_PRIORITY,
+)
 def run_due_feishu_reports() -> dict[str, int]:
     with SessionLocal() as session:
         schedules = due_schedules(session, now=utc_now())
@@ -36,7 +40,11 @@ def run_due_feishu_reports() -> dict[str, int]:
         return {"processed": processed, "sent": sent, "empty": empty, "failed": failed}
 
 
-@celery_app.task(name="app.workers.tasks_feishu_reports.run_feishu_report_schedule")
+@celery_app.task(
+    name="app.workers.tasks_feishu_reports.run_feishu_report_schedule",
+    queue=CELERY_REPORT_QUEUE,
+    priority=CELERY_REPORT_PRIORITY,
+)
 def run_feishu_report_schedule(schedule_id: str) -> dict[str, str | int | None]:
     with SessionLocal() as session:
         schedule = session.scalar(
@@ -57,7 +65,11 @@ def run_feishu_report_schedule(schedule_id: str) -> dict[str, str | int | None]:
         }
 
 
-@celery_app.task(name="app.workers.tasks_feishu_reports.send_feishu_report_test")
+@celery_app.task(
+    name="app.workers.tasks_feishu_reports.send_feishu_report_test",
+    queue=CELERY_REPORT_QUEUE,
+    priority=CELERY_REPORT_PRIORITY,
+)
 def send_feishu_report_test(schedule_id: str) -> dict[str, str | int | None]:
     with SessionLocal() as session:
         schedule = session.scalar(

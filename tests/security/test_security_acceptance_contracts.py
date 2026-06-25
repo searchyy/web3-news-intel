@@ -80,6 +80,28 @@ sources:
     assert "localhost" in result.stderr or "private" in result.stderr
 
 
+def test_source_catalog_strict_contract_has_no_warnings() -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            "scripts/validate_sources.py",
+            "sources.yaml",
+            "--catalog-dir",
+            "source_catalog",
+            "--strict-contract",
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+    combined_output = result.stdout + result.stderr
+    assert result.returncode == 0, combined_output
+    assert "WARNING:" not in combined_output
+
+
 def test_frontend_performance_detects_chart_leakage(tmp_path: Path) -> None:
     assets = tmp_path / "assets"
     assets.mkdir()

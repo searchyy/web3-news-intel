@@ -1,15 +1,28 @@
 # GitHub Handoff
 
-Date: 2026-06-18
+Date: 2026-06-23
 
-This workspace is not a Git repository and no `GITHUB_REPO_URL` was provided. The code is ready for repository handoff, but no push, pull request, or GitHub Actions evidence has been produced from this workspace.
+Current workspace status:
+
+- Git repository: present
+- Evaluated commit: `64685c1247ca33d90bfb72acc06cb608c233112f`
+- Remote: `origin` -> `https://searchyy@github.com/searchyy/web3-news-intel.git`
+
+Local acceptance gates have passed, but production release remains `BLOCKED`
+until GitHub Actions and real-service Compose evidence are collected for the
+same commit.
 
 ## Before Pushing
 
-Run:
+Run or confirm the local gates:
 
 ```bash
 python scripts/pre_push_acceptance.py
+python scripts/validate_sources.py sources.yaml --strict-contract --catalog-dir source_catalog
+cd frontend && npm run typecheck
+cd frontend && npm test
+cd frontend && npm run build
+docker compose config --quiet
 ```
 
 Confirm ignored files are not staged:
@@ -18,45 +31,22 @@ Confirm ignored files are not staged:
 git status --ignored --short
 ```
 
-Do not commit `.env`, tokens, virtual environments, caches, logs, local databases, or generated artifacts.
+Do not commit `.env`, tokens, virtual environments, caches, logs, local
+databases, or generated artifacts.
 
-## New Empty GitHub Repository
+## Push Current Repository
 
-Use this only for a new empty remote repository:
-
-```bash
-git init
-git branch -M main
-git add .
-git status
-git commit -m "feat: bootstrap web3 news intelligence service"
-git remote add origin <GITHUB_REPO_URL>
-git push -u origin main
-```
-
-Do not force push.
-
-## Existing GitHub Repository With History
-
-Use a clean clone so existing remote history is preserved:
+Use the current repository history and remote. Do not reinitialize the
+repository and do not force push.
 
 ```bash
-git clone <GITHUB_REPO_URL> web3-news-intel-repo
-cd web3-news-intel-repo
-git switch -c ci/phase-12-production-acceptance
+git status --short
+git rev-parse HEAD
+git push origin HEAD
 ```
 
-Copy the current workspace contents into the clone without copying or overwriting `.git`, then run:
-
-```bash
-python scripts/pre_push_acceptance.py
-git add .
-git status
-git commit -m "ci: add real-service production acceptance"
-git push -u origin ci/phase-12-production-acceptance
-```
-
-If `gh` is unavailable, open GitHub in a browser and create a pull request from `ci/phase-12-production-acceptance` into the repository's default branch.
+If work is being prepared on a feature branch, push that branch and open a pull
+request into the repository's default branch.
 
 ## CI Evidence Collection
 
@@ -72,8 +62,11 @@ gh run view <RUN_ID> --log-failed
 Required jobs:
 
 - `quality`
+- `frontend-quality`
 - `postgres-integration`
 - `redis-celery-integration`
 - `compose-acceptance`
 
-Release remains `BLOCKED` until all four jobs pass on the current commit with zero service-gated skips.
+Release remains `BLOCKED` until all required jobs pass on the current commit
+with zero service-gated skips and the evidence is recorded in
+`docs/PRODUCTION_ACCEPTANCE.md`.

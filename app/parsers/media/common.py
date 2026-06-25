@@ -106,6 +106,7 @@ def safe_media_raw_metadata(
     title: str,
     summary: str | None,
     original_url: str,
+    official_confirmation: bool = False,
 ) -> dict[str, Any]:
     text = f"{title} {summary or ''}"
     symbols = extract_symbols(text)
@@ -119,8 +120,8 @@ def safe_media_raw_metadata(
         "source_group": source_group,
         "parser": parser,
         "parser_version": parser_version,
-        "official_confirmation": False,
-        "requires_multisource_confirmation": True,
+        "official_confirmation": official_confirmation,
+        "requires_multisource_confirmation": not official_confirmation,
         "copyright_scope": "metadata_summary_link_only",
         "article_body_saved": False,
         "cluster_hint": {

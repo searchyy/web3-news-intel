@@ -11,7 +11,7 @@ from app.api.routes import admin_api
 from app.core.admin_auth import _login_failures
 from app.core.config import settings
 from app.core.field_encryption import FieldEncryptor
-from app.db.models import Event
+from app.db.models import Event, NotificationDestination
 from app.db.session import get_session
 from app.main import app
 from app.schemas.admin import DestinationRead, FeishuTestResult
@@ -194,6 +194,64 @@ def test_event_read_exposes_chinese_display_fields() -> None:
     assert payload["category_label"] == "协议更新"
     assert payload["severity_label"] == "高"
     assert payload["status_label"] == "已确认"
+
+
+@pytest.mark.asyncio
+async def test_notification_rule_defaults_disabled_and_activation_starts_on_enable(
+    monkeypatch, db_session
+) -> None:
+    monkeypatch.setattr(settings, "admin_username", "admin")
+    monkeypatch.setattr(settings, "admin_password_hash", PasswordHasher().hash("password"))
+    monkeypatch.setattr(settings, "admin_session_secret", "test-session-secret")
+    monkeypatch.setattr(settings, "admin_secure_cookie", False)
+    old_activation = datetime(2026, 6, 20, tzinfo=UTC)
+    destination = NotificationDestination(
+        key="feishu-rule-test",
+        name="飞书测试群",
+        provider="feishu_webhook",
+        enabled=True,
+        status="active",
+        activated_at=old_activation,
+        config={},
+    )
+    db_session.add(destination)
+    db_session.flush()
+
+    def override_session():
+        yield db_session
+
+    app.dependency_overrides[get_session] = override_session
+    try:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            login = await client.post(
+                "/api/admin/auth/login",
+                json={"username": "admin", "password": "password"},
+            )
+            csrf = login.json()["csrf_token"]
+            created = await client.post(
+                "/api/admin/rules",
+                json={"destination_id": str(destination.id), "name": "高风险即时通知"},
+                headers={"x-csrf-token": csrf},
+            )
+            assert created.status_code == 200
+            body = created.json()
+            assert body["enabled"] is False
+            db_session.refresh(destination)
+            assert destination.activated_at is not None
+            assert destination.activated_at.replace(tzinfo=UTC) == old_activation
+
+            enabled = await client.patch(
+                f"/api/admin/rules/{body['id']}",
+                json={"enabled": True},
+                headers={"x-csrf-token": csrf},
+            )
+            assert enabled.status_code == 200
+            db_session.refresh(destination)
+            assert destination.activated_at is not None
+            assert destination.activated_at.replace(tzinfo=UTC) > old_activation
+    finally:
+        app.dependency_overrides.clear()
 
 
 @pytest.mark.asyncio

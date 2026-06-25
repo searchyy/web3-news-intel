@@ -5,7 +5,7 @@ import json
 import httpx
 import pytest
 
-from app.db.models import Event
+from app.db.models import Event, EventAIInsight
 from app.integrations.feishu.card_renderer import render_event_card, render_event_text
 from app.integrations.feishu.client import FeishuClient, validate_feishu_webhook_url
 from app.integrations.feishu.errors import FeishuConfigurationError
@@ -106,3 +106,38 @@ def test_card_rendering_escapes_and_bounds() -> None:
     assert "<script>" not in text
     assert "&lt;script&gt;" in text
     assert render_event_text(event)
+
+
+def test_event_card_prefers_ai_summary_over_event_fallback() -> None:
+    event = Event(
+        id=1,
+        event_key="security:ai-summary",
+        title="安全事件",
+        summary="基础摘要",
+        category="security",
+        status="confirmed",
+        severity="high",
+        trust_score=92,
+        confirmation_count=2,
+        symbols=["ETH"],
+        chains=[],
+        entities=[],
+        metadata_={},
+        ai_insights=[
+            EventAIInsight(
+                provider="deepseek",
+                model="mock",
+                prompt_version="v1",
+                input_hash="input",
+                summary_zh="AI 风险摘要",
+                status="success",
+            )
+        ],
+    )
+
+    card_text = json.dumps(render_event_card(event), ensure_ascii=False)
+    plain_text = render_event_text(event)
+
+    assert "AI 风险摘要" in card_text
+    assert "AI 风险摘要" in plain_text
+    assert "基础摘要" not in card_text

@@ -7,6 +7,7 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 .pytest_tmp/
+.runtime/
 tests/.pytest_tmp/
 tests/_pytest_tmp/
 tests/_acceptance_tmp/

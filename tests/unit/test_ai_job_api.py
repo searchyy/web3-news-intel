@@ -66,6 +66,56 @@ async def test_ai_summary_async_creates_queryable_job(monkeypatch, db_session) -
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("redis_available", "worker_available"),
+    [(False, True), (True, False)],
+)
+async def test_ai_summary_async_runtime_unavailable_returns_503_without_sync_fallback(
+    monkeypatch, db_session, redis_available: bool, worker_available: bool
+) -> None:
+    csrf, client = await _logged_in_client(monkeypatch, db_session)
+    event = _event(event_key=f"ai:runtime:{redis_available}:{worker_available}")
+    db_session.add(event)
+    db_session.flush()
+    _configure_ai(monkeypatch, db_session)
+
+    class FailTask:
+        def apply_async(self, *_args, **_kwargs):
+            pytest.fail("async task should not be queued when runtime is unavailable")
+
+    def fail_sync(*_args, **_kwargs):
+        pytest.fail("async runtime failure must not fall back to sync execution")
+
+    monkeypatch.setattr(admin_api, "summarize_event_task", FailTask())
+    monkeypatch.setattr(admin_api, "summarize_event_sync", fail_sync)
+    monkeypatch.setattr(
+        admin_api,
+        "_ai_runtime_status",
+        lambda: AIRuntimeStatus(
+            execution_mode="async",
+            sync_allowed=True,
+            redis_available=redis_available,
+            worker_available=worker_available,
+            queue_name="ai",
+            status="degraded",
+            error="runtime unavailable",
+        ),
+    )
+    monkeypatch.setenv("AI_EXECUTION_MODE", "async")
+
+    try:
+        response = await client.post(
+            f"/api/admin/events/{event.id}/ai-summary",
+            json={"force": False},
+            headers={"x-csrf-token": csrf},
+        )
+        assert response.status_code == 503
+    finally:
+        await client.aclose()
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
 async def test_ai_job_retry_and_cancel(monkeypatch, db_session) -> None:
     csrf, client = await _logged_in_client(monkeypatch, db_session)
     event = _event(event_key="ai:retry")
@@ -134,6 +184,35 @@ async def test_ai_job_retry_and_cancel(monkeypatch, db_session) -> None:
 
 
 @pytest.mark.asyncio
+async def test_ai_summary_sync_production_returns_503_without_running_sync(
+    monkeypatch, db_session
+) -> None:
+    csrf, client = await _logged_in_client(monkeypatch, db_session)
+    event = _event(event_key="ai:sync:production")
+    db_session.add(event)
+    db_session.flush()
+    _configure_ai(monkeypatch, db_session)
+
+    def fail_sync(*_args, **_kwargs):
+        pytest.fail("sync execution should be forbidden outside local/development/test")
+
+    monkeypatch.setenv("AI_EXECUTION_MODE", "sync")
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setattr(admin_api, "summarize_event_sync", fail_sync)
+
+    try:
+        response = await client.post(
+            f"/api/admin/events/{event.id}/ai-summary",
+            json={"force": False},
+            headers={"x-csrf-token": csrf},
+        )
+        assert response.status_code == 503
+    finally:
+        await client.aclose()
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
 async def test_ai_summary_sync_development_returns_insight(monkeypatch, db_session) -> None:
     csrf, client = await _logged_in_client(monkeypatch, db_session)
     event = _event(event_key="ai:sync")
@@ -197,6 +276,33 @@ async def test_ai_runtime_status_reports_worker_failure(monkeypatch, db_session)
         await client.aclose()
         app.dependency_overrides.clear()
 
+@pytest.mark.asyncio
+async def test_event_ai_insight_returns_null_when_missing(monkeypatch, db_session) -> None:
+    _csrf, client = await _logged_in_client(monkeypatch, db_session)
+    event = _event(event_key="ai:insight:missing")
+    db_session.add(event)
+    db_session.flush()
+
+    try:
+        response = await client.get(f"/api/admin/events/{event.id}/ai-insight")
+        assert response.status_code == 200
+        assert response.json() is None
+    finally:
+        await client.aclose()
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_event_ai_insight_missing_event_returns_404(monkeypatch, db_session) -> None:
+    _csrf, client = await _logged_in_client(monkeypatch, db_session)
+
+    try:
+        response = await client.get("/api/admin/events/999999/ai-insight")
+        assert response.status_code == 404
+        assert response.json()["detail"] == "事件不存在"
+    finally:
+        await client.aclose()
+        app.dependency_overrides.clear()
 
 async def _logged_in_client(monkeypatch, db_session) -> tuple[str, httpx.AsyncClient]:
     monkeypatch.setattr(settings, "admin_username", "admin")

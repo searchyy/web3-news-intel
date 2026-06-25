@@ -11,6 +11,7 @@ from app.db.models import Delivery, Event, NotificationDestination
 from app.db.repositories.delivery_repo import DeliveryRepository
 from app.integrations.feishu.card_renderer import render_event_card
 from app.integrations.feishu.client import FeishuClient
+from app.integrations.feishu.errors import FeishuTransientError
 from app.integrations.feishu.models import FeishuSendResult
 from app.publishers.base import PublisherResult
 
@@ -102,7 +103,17 @@ async def publish_feishu_once(
     if not repo.claim_sending(delivery):
         return delivery
     session.commit()
-    result = await publisher.publish(event)
+    try:
+        result = await publisher.publish(event)
+    except Exception as exc:
+        repo.mark_failed(
+            delivery,
+            _sanitize_error(str(exc) or "Feishu delivery failed"),
+            response_status=getattr(exc, "status_code", None),
+            retry_after=_retry_after_from_exception(exc),
+        )
+        session.flush()
+        return delivery
     if result.ok:
         repo.mark_delivered(
             delivery,
@@ -125,6 +136,13 @@ def feishu_delivery_idempotency_key(
 ) -> str:
     raw = f"{destination.id}:{event.id}:{event.event_key}:{delivery_variant}"
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _retry_after_from_exception(exc: BaseException) -> int | None:
+    if isinstance(exc, FeishuTransientError):
+        return exc.retry_after
+    value = getattr(exc, "retry_after", None)
+    return int(value) if isinstance(value, int) else None
 
 
 def _publisher_result(result: FeishuSendResult) -> PublisherResult:

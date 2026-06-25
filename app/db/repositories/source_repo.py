@@ -7,6 +7,8 @@ from app.core.config import SourceConfig
 from app.core.time import utc_now
 from app.db.models import Source
 
+_RUNTIME_OWNED_FIELDS = {"health_status"}
+
 
 class SourceRepository:
     def __init__(self, session: Session):
@@ -29,6 +31,8 @@ class SourceRepository:
             self.session.add(source)
             return source
         for field, value in values.items():
+            if field in _RUNTIME_OWNED_FIELDS:
+                continue
             setattr(source, field, value)
         source.updated_at = utc_now()
         return source

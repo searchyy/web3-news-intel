@@ -5,7 +5,7 @@ import html
 import re
 from datetime import UTC, datetime
 from typing import Any
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlsplit
 
 from app.core.config import SourceConfig
 from app.core.time import parse_datetime
@@ -271,6 +271,8 @@ def build_normalized_item(
     if not cleaned_title or not url:
         return None
     absolute_url = urljoin(raw.url, str(url))
+    if urlsplit(absolute_url).scheme.lower() not in {"http", "https"}:
+        return None
     cleaned_summary = clean_text(summary)
     exchange_category = category or classify_exchange_category(
         cleaned_title,

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from app.core.config import SourceConfig
 from app.fetch.client import FetchClient
-from app.fetch.conditionals import conditional_request_headers, conditional_response_metadata
+from app.fetch.conditionals import conditional_response_metadata, source_request_headers
 from app.parsers.media.json_api import parse_media_json
 from app.pipeline.normalize import canonicalize_url
 from app.schemas.normalized_item import NormalizedItem
@@ -18,7 +18,7 @@ class MediaJSONAPIAdapter:
         etag: str | None = None,
         last_modified: str | None = None,
     ) -> list[RawDocumentPayload]:
-        headers = conditional_request_headers(etag=etag, last_modified=last_modified)
+        headers = source_request_headers(source, etag=etag, last_modified=last_modified)
         response = await fetch_client.get_text(
             source.url,
             headers=headers or None,

@@ -8,7 +8,7 @@ from argon2 import PasswordHasher
 
 from app.core.admin_auth import _login_failures
 from app.core.config import settings
-from app.db.models import Event, EventSource, Source
+from app.db.models import Event, EventAIInsight, EventSource, Source
 from app.db.repositories.event_search_repo import EventSearchRepository
 from app.db.session import get_session
 from app.main import app
@@ -115,6 +115,168 @@ def test_event_search_keyword_modes_filters_facets_and_pagination(db_session) ->
     assert _bucket_count(facets.source_groups, "exchange_official") == 1
     assert _bucket_count(facets.symbols, "BTC") == 1
 
+
+def test_event_search_defaults_to_latest_first_seen_at(db_session) -> None:
+    now = datetime(2026, 6, 21, 12, 0, tzinfo=UTC)
+    latest_crawled = _event(
+        "default:latest-crawled",
+        "Older publish but newest crawl",
+        "Fetched after the newer article was published.",
+        "market",
+        "confirmed",
+        "normal",
+        [],
+        [],
+        now - timedelta(days=1),
+        trust_score=70,
+    )
+    latest_crawled.first_seen_at = now
+    latest_published = _event(
+        "default:latest-published",
+        "Newer publish but older crawl",
+        "Published later, but fetched earlier.",
+        "market",
+        "confirmed",
+        "normal",
+        [],
+        [],
+        now,
+        trust_score=70,
+    )
+    latest_published.first_seen_at = now - timedelta(hours=1)
+    db_session.add_all([latest_crawled, latest_published])
+    db_session.commit()
+
+    result = EventSearchRepository(db_session).search(EventSearchParams())
+
+    assert result.sort == "first_seen_at"
+    assert [item.event_key for item in result.items[:2]] == [
+        "default:latest-crawled",
+        "default:latest-published",
+    ]
+
+
+def test_event_search_filters_trust_focus_and_ai_importance_ranges(db_session) -> None:
+    now = datetime(2026, 6, 21, 12, 0, tzinfo=UTC)
+    important = _event(
+        "quick:important",
+        "Important listing",
+        "High confidence listing",
+        "listing",
+        "confirmed",
+        "high",
+        ["BTC"],
+        ["Bitcoin"],
+        now,
+        trust_score=92,
+    )
+    medium = _event(
+        "quick:medium",
+        "Medium confidence note",
+        "Moderate confidence market note",
+        "market",
+        "confirmed",
+        "normal",
+        ["ETH"],
+        ["Ethereum"],
+        now - timedelta(minutes=1),
+        trust_score=65,
+    )
+    low = _event(
+        "quick:low",
+        "Low confidence note",
+        "Low confidence market note",
+        "market",
+        "confirmed",
+        "low",
+        ["SOL"],
+        ["Solana"],
+        now - timedelta(minutes=2),
+        trust_score=45,
+    )
+    important.metadata_ = {"priority_score": 75, "priority_tier": "A"}
+    medium.metadata_ = {"priority_score": 45, "priority_tier": "noise"}
+    low.metadata_ = {"priority_score": 30, "priority_tier": "noise"}
+    db_session.add_all([important, medium, low])
+    db_session.flush()
+    db_session.add_all(
+        [
+            _insight(
+                important.id,
+                "important",
+                status="success",
+                importance_score=72,
+                generated_at=now,
+            ),
+            _insight(medium.id, "medium", status="success", importance_score=45, generated_at=now),
+            _insight(low.id, "low", status="failed", importance_score=99, generated_at=now),
+        ]
+    )
+    db_session.commit()
+
+    repo = EventSearchRepository(db_session)
+
+    medium_trust = repo.search(EventSearchParams(minimum_trust_score=60, maximum_trust_score=79))
+    assert [item.event_key for item in medium_trust.items] == ["quick:medium"]
+
+    not_important = repo.search(EventSearchParams(maximum_priority_score=59, sort="priority_score"))
+    assert {item.event_key for item in not_important.items} == {"quick:medium", "quick:low"}
+
+    ai_key = repo.search(EventSearchParams(has_ai_summary=True, minimum_ai_importance_score=60))
+    assert [item.event_key for item in ai_key.items] == ["quick:important"]
+
+    without_successful_ai = repo.search(EventSearchParams(has_ai_summary=False))
+    assert [item.event_key for item in without_successful_ai.items] == ["quick:low"]
+
+
+@pytest.mark.asyncio
+async def test_admin_event_search_api_defaults_to_latest_first_seen_at(
+    monkeypatch, db_session
+) -> None:
+    now = datetime(2026, 6, 21, 12, 0, tzinfo=UTC)
+    latest_crawled = _event(
+        "api:latest-crawled",
+        "Older publish but newest crawl",
+        "Fetched after the newer article was published.",
+        "market",
+        "confirmed",
+        "normal",
+        [],
+        [],
+        now - timedelta(days=1),
+        trust_score=70,
+    )
+    latest_crawled.first_seen_at = now
+    latest_published = _event(
+        "api:latest-published",
+        "Newer publish but older crawl",
+        "Published later, but fetched earlier.",
+        "market",
+        "confirmed",
+        "normal",
+        [],
+        [],
+        now,
+        trust_score=70,
+    )
+    latest_published.first_seen_at = now - timedelta(hours=1)
+    db_session.add_all([latest_crawled, latest_published])
+    db_session.commit()
+
+    transport = httpx.ASGITransport(app=app)
+    try:
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            csrf = await _login(monkeypatch, db_session, client)
+            response = await client.get("/api/admin/events", headers={"x-csrf-token": csrf})
+            assert response.status_code == 200
+            body = response.json()
+            assert body["sort"] == "first_seen_at"
+            assert [item["event_key"] for item in body["items"][:2]] == [
+                "api:latest-crawled",
+                "api:latest-published",
+            ]
+    finally:
+        app.dependency_overrides.clear()
 
 @pytest.mark.asyncio
 async def test_admin_event_search_api_rejects_sort_injection(monkeypatch, db_session) -> None:
@@ -234,6 +396,42 @@ def _event(
     )
 
 
+def _insight(
+    event_id: int,
+    suffix: str,
+    *,
+    status: str,
+    importance_score: int,
+    generated_at: datetime,
+) -> EventAIInsight:
+    return EventAIInsight(
+        event_id=event_id,
+        provider="deepseek",
+        model="mock",
+        prompt_version="v1",
+        input_hash=f"hash-{suffix}",
+        summary_zh=f"summary {suffix}" if status == "success" else None,
+        headline_zh=f"headline {suffix}" if status == "success" else None,
+        key_facts=[],
+        entities=[],
+        symbols=[],
+        chains=[],
+        event_type="market",
+        importance_score=importance_score,
+        risk_level="low",
+        sentiment="neutral",
+        market_impact=None,
+        facts=[],
+        inferences=[],
+        confidence=0.8,
+        source_event_ids=[],
+        source_urls=[],
+        input_quality="summary",
+        prompt_tokens=1,
+        completion_tokens=1,
+        generated_at=generated_at,
+        status=status,
+    )
 def _bucket_count(buckets, key: str) -> int:
     return next((bucket.count for bucket in buckets if bucket.key == key), 0)
 
